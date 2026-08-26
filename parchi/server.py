@@ -169,6 +169,14 @@ def create_app():
             return FileResponse(page)
         return JSONResponse({"service": "parchi", "see": "/healthz"})
 
+    @app.get("/architecture.svg")
+    def architecture():
+        """The architecture diagram, served by the thing it describes."""
+        page = STATIC / "architecture.svg"
+        if page.exists():
+            return FileResponse(page, media_type="image/svg+xml")
+        raise HTTPException(404, "diagram not bundled")
+
     @app.post("/api/seed")
     def seed():
         """Load the constructed fixture. Idempotent."""
