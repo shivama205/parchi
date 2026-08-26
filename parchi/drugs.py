@@ -93,6 +93,41 @@ BRAND_TABLE: dict[str, tuple[str, ...]] = {
     "Urimax D": ("tamsulosin", "dutasteride"),
     # -- supplements ------------------------------------------------------
     "Shelcal": ("calcium carbonate", "cholecalciferol"),
+
+    # ------------------------------------------------------------------
+    # Added from the MIRAGE corpus's most frequent unresolved brands.
+    # Each composition was checked against Indian pharmacy or manufacturer
+    # sources before being added here; entries that could not be confirmed
+    # were left out rather than guessed. See README "The brand table is
+    # demo-grade" for what that does and does not buy.
+    # ------------------------------------------------------------------
+    # respiratory / allergy — Montair FX composition per Cipla's own product
+    # page (ciplamed.com) and RxIndia's composition index.
+    "Montair": ("montelukast",),
+    "Montair LC": ("montelukast", "levocetirizine"),
+    "Montair FX": ("montelukast", "fexofenadine"),
+    "Montek": ("montelukast",),
+    "Montek LC": ("montelukast", "levocetirizine"),
+    "Allegra": ("fexofenadine",),
+    "Allegra M": ("montelukast", "fexofenadine"),
+    # gastro — Pantocid is Sun Pharma's pantoprazole; the IT variant adds
+    # itopride.
+    "Pantocid": ("pantoprazole",),
+    "Pantocid IT": ("pantoprazole", "itopride"),
+    # lipids — Tonact is atorvastatin, giving a second brand for a molecule
+    # already reachable through Ecosprin AV and Storvas.
+    "Tonact": ("atorvastatin",),
+    # antidiabetics — Volix is Sun Pharma's voglibose; Glimy is Dr Reddy's
+    # glimepiride. Both appear on the demo prescription.
+    "Volix": ("voglibose",),
+    "Glimy": ("glimepiride",),
+    "Lantus": ("insulin glargine",),
+    # neuro / analgesia
+    "Nexito": ("escitalopram",),
+    "Maxgalin": ("pregabalin",),
+    "Maxgalin M": ("pregabalin", "meloxicam"),
+    "Meftal": ("mefenamic acid",),
+    "Azithral": ("azithromycin",),
 }
 
 #: Generic molecule names. Teaching-hospital prescribers write these (PRD §7).
@@ -108,6 +143,8 @@ GENERIC_MOLECULES = (
     "ciprofloxacin", "metronidazole",
     "gabapentin", "nortriptyline", "pregabalin",
     "tamsulosin", "dutasteride", "calcium carbonate", "cholecalciferol",
+    "montelukast", "levocetirizine", "fexofenadine", "mefenamic acid",
+    "meloxicam", "voglibose", "itopride", "escitalopram", "insulin glargine",
 )
 
 #: PRD §7 — known transcription confusions. A match against any member forces
@@ -269,10 +306,42 @@ for _display in BRAND_TABLE:
 for _mol in GENERIC_MOLECULES:
     _TABLE_BY_TOKENS.setdefault(tuple(_tokenise(_mol)), _mol)
 
-_CONFUSABLE: dict[str, tuple[str, ...]] = {}
+def _prefix_families() -> dict[str, tuple[str, ...]]:
+    """Brands whose name is a strict prefix of another brand's name.
+
+    "Glycomet" sits inside "Glycomet GP"; "Telma" inside "Telma H" and
+    "Telma AM"; "Montair" inside "Montair LC" and "Montair FX". Wherever that
+    holds, a reading that lost its suffix — to OCR, to a hurried transcription,
+    to a prescriber who did not write it — resolves cleanly to the base product
+    and silently drops a molecule. That is the same class of failure the
+    hand-written CONFUSION_SETS name, so it is derived from the table's own
+    shape rather than maintained by hand: a new combination product cannot be
+    added without its base brand automatically becoming demotable.
+
+    Only families whose members differ molecularly matter, and that test is
+    applied at resolve() time.
+    """
+    keys = {tuple(_tokenise(name)): name for name in BRAND_TABLE}
+    families: dict[str, set[str]] = {}
+    for tokens, name in keys.items():
+        for other_tokens, other_name in keys.items():
+            if len(other_tokens) <= len(tokens):
+                continue
+            if other_tokens[: len(tokens)] == tokens:
+                families.setdefault(name, set()).add(other_name)
+                families.setdefault(other_name, set()).add(name)
+    return {k: tuple(sorted(v)) for k, v in families.items()}
+
+
+_CONFUSABLE: dict[str, set[str]] = {}
 for _group in CONFUSION_SETS:
     for _member in _group:
-        _CONFUSABLE[_member] = tuple(m for m in _group if m != _member)
+        _CONFUSABLE.setdefault(_member, set()).update(
+            m for m in _group if m != _member
+        )
+for _name, _kin in _prefix_families().items():
+    _CONFUSABLE.setdefault(_name, set()).update(_kin)
+_CONFUSABLE = {k: tuple(sorted(v)) for k, v in _CONFUSABLE.items()}
 
 
 def molecules_for(display_name: str) -> tuple[str, ...]:

@@ -33,7 +33,7 @@ python3 -m venv .venv
 ./.venv/bin/python -m pip install -e '.[dev]'
 ```
 
-Run the test suite (170 tests):
+Run the test suite (172 tests):
 
 ```bash
 ./.venv/bin/python -m pytest -q
@@ -78,10 +78,10 @@ The dataset card does not state whether these prescriptions are real or
 simulated, and this repository does not assert either beyond what each source
 says. The MIRAGE paper describes its own corpus as simulated records.
 
-Against the current brand table, 30 of 344 annotated drug lines resolve. The
-rest become `NEEDS_CONFIRMATION` findings, which is the designed behaviour for
-an unknown product rather than a failure — but it is also a direct measure of
-how demo-grade the table is.
+Against the current brand table, 70 of 344 annotated drug lines resolve
+(20.3%). The rest become `NEEDS_CONFIRMATION` findings, which is the designed
+behaviour for an unknown product rather than a failure — but it is also a direct
+measure of how demo-grade the table is.
 
 ---
 
@@ -220,6 +220,24 @@ has. Before any real use it must be replaced with a table derived from an
 authoritative source (NPPA ceiling-price notifications, CDSCO listings) with a
 human review step. The machine-readability of those sources has not been
 verified.
+
+Nineteen brands were added from the corpus's most frequent unresolved names,
+each composition checked against Indian pharmacy or manufacturer sources —
+Cipla's own product page for Montair FX, Sanofi India's prescribing information
+for Lantus. Several candidates were **left out** because verification came back
+thin or contradictory: one search returned *Volini*, a pain spray, for *Volix*,
+and another asserted a composition for Vertin that conflicted with other
+sources. A wrong mapping is the worst failure this product has, so an
+unverifiable brand stays out and becomes a question instead.
+
+### Suffix-dropping is guarded structurally
+
+A reading that loses its suffix resolves cleanly to the base product and
+silently drops a molecule — "Telma H" read as "Telma" deletes a diuretic. Any
+brand whose name is a strict prefix of another brand's is therefore treated as
+confusable with its longer siblings, **derived from the table's own shape**
+rather than maintained by hand. Adding a combination product automatically makes
+its base demotable, so the guard cannot fall out of date.
 
 An unlisted variant resolves to nothing and becomes a question. That is the
 intended behaviour: `Telma CT` is telmisartan + chlorthalidone, and resolving it

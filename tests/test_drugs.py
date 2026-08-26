@@ -108,11 +108,40 @@ def test_molecularly_divergent_confusion_demotes_confidence():
 
 def test_molecularly_identical_confusion_does_not_demote():
     """Telma and Telmikind are both plain telmisartan, so confusing them cannot
-    produce a wrong drug and carries no penalty. See CONFUSION_SETS."""
-    r = resolve("Telma 40")
-    assert r.confusable_with == ("Telmikind",)
+    produce a wrong drug and carries no penalty. See CONFUSION_SETS.
+
+    Telmikind is the subject rather than Telma because Telma is also the prefix
+    of Telma H and Telma AM, which demotes it for a different and legitimate
+    reason — see test_a_base_brand_with_combination_siblings_demotes.
+    """
+    r = resolve("Telmikind 40")
+    assert r.confusable_with == ("Telma",)
     assert r.demote_confidence is False
     assert effective_confidence(Confidence.HIGH, r) is Confidence.HIGH
+
+
+def test_a_base_brand_with_combination_siblings_demotes():
+    """A reading that lost its suffix resolves cleanly to the base product and
+    silently drops a molecule, so any base brand with combination siblings in
+    the table can no longer be reported as established fact.
+
+    Derived from the table's shape, not hand-maintained: adding a combination
+    product automatically makes its base demotable.
+    """
+    r = resolve("Telma 40")
+    assert set(r.confusable_with) >= {"Telma H", "Telma AM"}
+    assert r.demote_confidence is True
+    assert effective_confidence(Confidence.HIGH, r) is Confidence.MEDIUM
+    # Still usable — MEDIUM informs medication state; only LOW is gated (SR-3).
+    from parchi.models import Confidence as C
+    assert effective_confidence(C.HIGH, r) is not C.LOW
+
+
+def test_prefix_families_are_symmetric():
+    """The confusion runs both ways: a spuriously added suffix is as wrong as a
+    dropped one."""
+    assert "Montair" in resolve("Montair FX").confusable_with
+    assert "Montair FX" in resolve("Montair 10").confusable_with
 
 
 def test_demotion_never_promotes():
@@ -250,11 +279,16 @@ def test_form_word_stripped_from_any_position(written):
 def test_relaxation_never_buys_a_match_by_dropping_a_molecule():
     """The progressive relaxation added for form words must not weaken §7.
 
-    MONTAIR FX is montelukast + fexofenadine and Telma CT is telmisartan +
-    chlorthalidone. Neither is in the table, and neither may fall back to a
-    base product we do happen to know.
+    Telma CT is telmisartan + chlorthalidone and Pantocid DSR is a different
+    combination again. None of these is in the table, and none may fall back to
+    a base product we do happen to know.
     """
-    for written in ("MONTAIR FX TAB", "Telma CT 40", "GLYCOMET GP TRIO XR"):
+    for written in (
+        "Telma CT 40",
+        "Pantocid DSR",
+        "Montek AB TAB",
+        "GLYCOMET GP TRIO XR",
+    ):
         assert resolve(written).molecules == (), written
 
 
