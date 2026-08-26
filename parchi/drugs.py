@@ -140,12 +140,30 @@ FREQUENCY_TOKENS = frozenset({
     "stat", "prn", "ac", "pc", "qd",
 })
 
-#: Dosage-form words. Prescriptions are written "Tab. Telma 40". A form word
-#: says nothing about composition, so it is dropped from the front of a reading.
+#: Dosage-form and delivery-device words. A form word says nothing about
+#: composition, so it can be dropped from ANYWHERE in a reading.
+#:
+#: Position matters here. Prescriptions put the form in front ("Tab. Telma 40"),
+#: at the end ("AUGMENTIN 625MG TAB") and in the middle ("DOLO TAB 650MG"), and
+#: real annotation data uses all three. Stripping only a leading form word left
+#: "augmentin 625mg tab" with a trailing token nothing could match, so every one
+#: of those readings failed to resolve.
 FORM_TOKENS = frozenset({
+    # oral solids
     "tab", "tabs", "tablet", "tablets", "cap", "caps", "capsule", "capsules",
-    "syp", "syr", "syrup", "susp", "suspension", "inj", "injection",
-    "oint", "ointment", "drop", "drops", "sachet", "powder",
+    "rotacap", "rotacaps", "sachet", "powder", "pwd", "granules",
+    # oral liquids
+    "syp", "syr", "syrup", "susp", "suspension", "soln", "solution", "elixir",
+    "drop", "drops", "gargle", "mouthwash",
+    # injectables and devices
+    "inj", "injection", "vial", "ampoule", "prefilled", "solostar", "kwikpen",
+    "penfill", "flexpen", "cartridge",
+    # inhaled
+    "mdi", "inhaler", "rotahaler", "respule", "respules", "neb", "nebuliser",
+    "nebulizer",
+    # topical
+    "oint", "ointment", "cream", "gel", "lotion", "spray", "patch", "eye",
+    "ear", "nasal",
 })
 
 #: Unit words that arrive as their own token — "60000 IU", "40 mg".
@@ -167,11 +185,9 @@ def _strength_match(token: str) -> re.Match | None:
     return _STRENGTH_RE.match(token)
 
 
-def _strip_form_prefix(tokens: list[str]) -> list[str]:
-    out = list(tokens)
-    while out and out[0] in FORM_TOKENS:
-        out.pop(0)
-    return out
+def _strip_forms(tokens: list[str]) -> list[str]:
+    """Drop every dosage-form and device word, wherever it appears."""
+    return [t for t in tokens if t not in FORM_TOKENS]
 
 
 def _is_droppable_tail(token: str) -> bool:
@@ -312,15 +328,31 @@ def resolve(brand_text: str) -> BrandResolution:
         return BrandResolution(brand_text=brand_text)
 
     parsed = _parse_strengths_mg(raw_tokens)
-    head = _strip_tail(_strip_form_prefix(raw_tokens))
 
+    # Progressive relaxation, most conservative first. Each step drops only
+    # tokens that cannot change composition, so a match is never bought by
+    # discarding a molecule.
+    head = _strip_tail(raw_tokens)
+    candidates: list[tuple[list[str], bool]] = [(head, False)]
+
+    without_forms = _strip_tail(_strip_forms(raw_tokens))
+    if without_forms != head:
+        candidates.append((without_forms, False))
+
+    for base in (head, without_forms):
+        relaxed = [t for t in base if t not in RELEASE_MODIFIERS]
+        if relaxed and relaxed != base:
+            candidates.append((relaxed, True))
+
+    key = None
     modifier_dropped = False
-    key = _match_exact(head)
-    if key is None:
-        trimmed = [t for t in head if t not in RELEASE_MODIFIERS]
-        if trimmed and trimmed != head:
-            key = _match_exact(trimmed)
-            modifier_dropped = key is not None
+    for tokens, dropped in candidates:
+        if not tokens:
+            continue
+        key = _match_exact(tokens)
+        if key is not None:
+            modifier_dropped = dropped
+            break
     if key is None:
         return BrandResolution(brand_text=brand_text)
 

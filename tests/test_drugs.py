@@ -209,3 +209,57 @@ def test_unlisted_combination_variant_does_not_resolve_to_its_base(written):
 )
 def test_dosage_form_prefix_is_stripped(written):
     assert resolve(written).resolved
+
+
+# -- real-world annotation formats ----------------------------------------
+# Every string below is a verbatim ground-truth annotation from the MIRAGE
+# subset (see fetch_fixtures.py). They caught a bug the constructed fixtures
+# missed entirely: form words appear in front, in the middle and at the end,
+# and stripping only a leading one left every such reading unresolvable.
+
+@pytest.mark.parametrize(
+    "written,expected",
+    [
+        ("DOLO TAB 650MG", ("paracetamol",)),                    # form in middle
+        ("AUGMENTIN 625MG TAB", ("amoxicillin", "clavulanic acid")),  # form last
+        ("Tab. Telma 40 mg OD", ("telmisartan",)),               # form first
+        ("PAN 40MG TAB", ("pantoprazole",)),
+        ("TELMA 40MG TAB", ("telmisartan",)),
+        ("TELMA-AM TAB", ("telmisartan", "amlodipine")),
+        ("JANUMET 50/1000MG TAB", ("sitagliptin", "metformin")),
+        ("AZEE 500MG TAB", ("azithromycin",)),
+        ("THYRONORM 62.5MCG TAB", ("levothyroxine",)),
+        ("SHELCAL 500MG TAB", ("calcium carbonate", "cholecalciferol")),
+        ("RANTAC SYP", ("ranitidine",)),
+        ("CROCIN SUSP", ("paracetamol",)),
+        ("LASIX TAB", ("furosemide",)),
+        ("ECOSPRIN AV 75MG TAB", ("aspirin", "atorvastatin")),
+    ],
+)
+def test_real_annotation_formats_resolve(written, expected):
+    assert resolve(written).molecules == expected
+
+
+@pytest.mark.parametrize(
+    "written", ["TELMA 40MG TAB", "DOLO TAB 650MG", "Tab Telma 40", "TELMA TAB 40MG"]
+)
+def test_form_word_stripped_from_any_position(written):
+    assert resolve(written).resolved
+
+
+def test_relaxation_never_buys_a_match_by_dropping_a_molecule():
+    """The progressive relaxation added for form words must not weaken §7.
+
+    MONTAIR FX is montelukast + fexofenadine and Telma CT is telmisartan +
+    chlorthalidone. Neither is in the table, and neither may fall back to a
+    base product we do happen to know.
+    """
+    for written in ("MONTAIR FX TAB", "Telma CT 40", "GLYCOMET GP TRIO XR"):
+        assert resolve(written).molecules == (), written
+
+
+def test_strength_still_suppressed_for_a_real_combination():
+    """JANUMET 50/1000MG: two numbers, two molecules, written order unknown."""
+    r = resolve("JANUMET 50/1000MG TAB")
+    assert len(r.molecules) == 2
+    assert r.strengths_mg == ()

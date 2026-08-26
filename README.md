@@ -33,7 +33,7 @@ python3 -m venv .venv
 ./.venv/bin/python -m pip install -e '.[dev]'
 ```
 
-Run the test suite (137 tests):
+Run the test suite (157 tests):
 
 ```bash
 ./.venv/bin/python -m pytest -q
@@ -45,6 +45,43 @@ See the reconciliation engine work on the constructed scenario — 9 documents,
 ```bash
 ./.venv/bin/python -m parchi.demo
 ```
+
+Fetch the external handwriting corpus (needed for extraction work, not for the
+tests):
+
+```bash
+./.venv/bin/python -m pip install -e '.[fixtures]'
+./.venv/bin/python fetch_fixtures.py
+```
+
+## External fixture corpus
+
+Handwritten prescriptions come from a 100-record subset of the MIRAGE corpus,
+released by its authors on HuggingFace:
+[chaithanyakota/100-handwritten-medical-records](https://huggingface.co/datasets/chaithanyakota/100-handwritten-medical-records).
+Licence **CC BY-ND 4.0**. Attribution: *MIRAGE: Multimodal Identification and
+Recognition of Annotations in Indian General Prescriptions*
+([arXiv:2410.09729](https://arxiv.org/abs/2410.09729)); the full 743,118-image
+corpus is proprietary to Medyug Technology Pvt. Ltd. and is not public.
+
+The NoDerivatives term shapes two design decisions:
+
+- **Images are fetched, never redistributed.** `fetch_fixtures.py` makes the
+  corpus reproducible without this repository carrying it, and
+  `fixtures/external/` is gitignored. Image bytes are written exactly as stored,
+  with no re-encoding.
+- **J2 draws a highlight box over the full image rather than showing a crop.**
+  §9.3 requires the caregiver to see what the model was looking at; an overlay
+  achieves that without producing a modified copy.
+
+The dataset card does not state whether these prescriptions are real or
+simulated, and this repository does not assert either beyond what each source
+says. The MIRAGE paper describes its own corpus as simulated records.
+
+Against the current brand table, 30 of 344 annotated drug lines resolve. The
+rest become `NEEDS_CONFIRMATION` findings, which is the designed behaviour for
+an unknown product rather than a failure — but it is also a direct measure of
+how demo-grade the table is.
 
 ---
 
