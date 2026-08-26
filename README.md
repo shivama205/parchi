@@ -33,7 +33,7 @@ python3 -m venv .venv
 ./.venv/bin/python -m pip install -e '.[dev]'
 ```
 
-Run the test suite (157 tests):
+Run the test suite (170 tests):
 
 ```bash
 ./.venv/bin/python -m pytest -q
