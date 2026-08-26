@@ -7,3 +7,4 @@ fixtures/private/
 fixtures/external/
 .env.local
 .env*.local
+.sweep-token.local

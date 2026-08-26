@@ -17,7 +17,13 @@ a language model from the inside, and pretending otherwise would be the kind of
 overclaim this product exists to avoid.
 """
 
-from __future__ import annotations
+# NO `from __future__ import annotations` IN THIS FILE, DELIBERATELY.
+#
+# It turns every annotation into a string, and FastAPI resolves those against
+# module globals. Anything declared or imported inside create_app() then cannot
+# be found: a request body silently degrades into a query parameter (every POST
+# returns 422) and schema generation fails outright (/openapi.json returns 500).
+# Both of those shipped to Cloud Run before a route test caught them.
 
 import os
 import uuid
@@ -124,9 +130,17 @@ def create_app():
 
     app = FastAPI(title="Parchi", version="0.1.0")
 
-    @app.get("/healthz")
-    def healthz():
-        return {"ok": True, "agents": ["parchi", *fleet], "today": today().isoformat()}
+    def _health():
+        return {"ok": True, "agents": ["parchi", *fleet],
+                "today": today().isoformat(),
+                "store": type(store).__name__}
+
+    # Health lives under /api because a bare /healthz is answered upstream of the
+    # container on Cloud Run — the 404 arrives with no Google Frontend header, so
+    # the request never reaches this process. /healthz is kept as an alias for
+    # local use.
+    app.get("/api/health")(_health)
+    app.get("/healthz")(_health)
 
     @app.get("/")
     def index():

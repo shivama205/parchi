@@ -1,0 +1,12 @@
+.git/
+.venv/
+.pytest_cache/
+__pycache__/
+*.pyc
+tests/
+fixtures/external/
+fixtures/private/
+.claude/
+run_local.sh
+*.md
+.env*
