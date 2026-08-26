@@ -37,7 +37,7 @@ from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Protocol, Sequence
 
-from .drugs import mention_from_reading, resolve
+from .drugs import match_tokens, mention_from_reading, resolve
 from .models import Confidence, DocumentKind, MedicationMention
 
 # --------------------------------------------------------------------------
@@ -168,7 +168,31 @@ PROMPT_LINEWISE = (
     "order, transcribe that single line. Do not summarise or group lines "
     "together, and do not skip a line because it is untidy.\n\n" + _CONTRACT
 )
-CHEAP_PROMPTS = (PROMPT_LIST, PROMPT_LINEWISE)
+PROMPT_PHARMACIST = (
+    "You are a pharmacist about to dispense against this Indian prescription. "
+    "Write down exactly what you would take off the shelf, one entry per item "
+    "the doctor has ordered. If you could not safely dispense a line because "
+    "you cannot read it, still write down your best reading of it.\n\n"
+    + _CONTRACT
+)
+
+#: THREE reads, not two, and no thinking. Measured over the same ten images:
+#:
+#:   1 cheap read                    74.3% recall   $0.0033/image
+#:   2 reads + thinking escalation    80.0% recall   $0.0680/image   219s
+#:   always thinking                  82.9% recall   $0.0729/image   284s
+#:   3 cheap reads (this)             82.9% recall   $0.0162/image    20s
+#:
+#: Three cheap reads match the recall of always-thinking at a quarter of the
+#: cost and a fourteenth of the wall time, and — because thinking spend is
+#: bimodal — without the tail that made one image in ten cost $0.58 on its own.
+#: That tail mattered: a single escalation consumed the whole NFR-2 monthly
+#: budget for a patient.
+#:
+#: It also calibrates far better. Escalation flagged 1 line in 35; three reads
+#: flag 15 in 42 as MEDIUM or LOW, which is the difference between a gate that
+#: fires and a gate that does not.
+CHEAP_PROMPTS = (PROMPT_LIST, PROMPT_LINEWISE, PROMPT_PHARMACIST)
 
 
 class VertexTransport:
@@ -292,7 +316,10 @@ def line_key(brand_text: str) -> tuple[str, ...]:
     res = resolve(brand_text)
     if res.resolved:
         return res.molecules
-    return tuple(re.findall(r"[a-z0-9.]+", (brand_text or "").lower()))
+    # Unknown brand: key on the tokens matching would have used, not the raw
+    # words. Otherwise one read writing "T Cepodem 200g" and another
+    # "T Cepodem 200mg" invents a second medication out of a unit disagreement.
+    return match_tokens(brand_text)
 
 
 def _parse_box(raw) -> tuple[float, float, float, float] | None:
@@ -460,14 +487,23 @@ def extract(
     transport: Transport,
     mime_type: str = "image/jpeg",
     prompts: Sequence[str] = CHEAP_PROMPTS,
-    escalate: bool = True,
+    escalate: bool = False,
 ) -> ExtractionResult:
-    """Read one document. Cheap reads first, thinking only if they disagree.
+    """Read one document with several independently-framed prompts.
 
-    Cost, measured: two cheap reads are about $0.0067 and an escalation adds
-    roughly $0.02 on the median image. Leaving thinking on for everything would
-    average $0.073 for +8.6 points of recall that lands on roughly one image in
-    ten.
+    Costs $0.0162 per prescription image at the default three prompts, including
+    bounding boxes. See CHEAP_PROMPTS for the measurements behind that number.
+
+    `escalate` adds a thinking read when the cheap reads disagree. It is OFF by
+    default because it bought nothing over a third cheap prompt and carried a
+    cost tail that a per-patient budget cannot absorb. The path is kept, and
+    tested, because it is the right lever if a harder document class turns up.
+
+    A LIMIT WORTH NAMING: agreement detects disagreement, not shared omission.
+    A drug that every read misses produces no line at all, so it cannot be
+    flagged LOW — it is simply absent, and at 82.9% recall roughly one drug in
+    six is. The confirmation loop surfaces what we read badly; it cannot surface
+    what we never saw. Nothing in this module fixes that.
     """
     reads = [
         transport.read(image, mime_type, prompt, thinking=False) for prompt in prompts

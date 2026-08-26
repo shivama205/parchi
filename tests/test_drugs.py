@@ -386,3 +386,42 @@ def test_only_a_standalone_instruction_token_is_dropped():
 
 def test_instruction_words_never_rescue_an_unknown_brand():
     assert resolve("Cont. Tab Zzqx 5").molecules == ()
+
+
+# -- single-letter dosage-form abbreviations ------------------------------
+
+@pytest.mark.parametrize(
+    "written,expected",
+    [
+        ("T Allegra 120mg", ("fexofenadine",)),
+        ("T Allegra 120g", ("fexofenadine",)),
+        ("T. Pantocid 40", ("pantoprazole",)),
+        ("T Crocin 650", ("paracetamol",)),
+        ("T Telma 40 OD", ("telmisartan",)),
+        ("C Urimax 0.4", ("tamsulosin",)),
+        ("Tb Ecosprin 75", ("aspirin",)),
+    ],
+)
+def test_single_letter_form_abbreviations_resolve(written, expected):
+    """"T Allegra 120mg" is how prescriptions are written. Regression from a
+    live run where every such line failed to resolve despite the brand being in
+    the table."""
+    assert resolve(written).molecules == expected
+
+
+def test_match_tokens_reduces_a_reading_to_what_matching_uses():
+    from parchi.drugs import match_tokens
+
+    assert match_tokens("T Allegra 120mg") == ("allegra",)
+    assert match_tokens("T Allegra 120g") == ("allegra",)
+    assert match_tokens("Cont. Tab Glimy (4mg) 1 BD") == ("glimy",)
+    assert match_tokens("Tab Telma H 40") == ("telma", "h")
+    assert match_tokens("") == ()
+
+
+def test_match_tokens_keeps_a_composition_suffix():
+    """It must not collapse a combination onto its base."""
+    from parchi.drugs import match_tokens
+
+    assert match_tokens("Tab Glycomet GP 2") == ("glycomet", "gp")
+    assert match_tokens("T Montair FX") == ("montair", "fx")

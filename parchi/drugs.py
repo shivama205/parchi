@@ -198,6 +198,10 @@ FREQUENCY_TOKENS = frozenset({
 #: "augmentin 625mg tab" with a trailing token nothing could match, so every one
 #: of those readings failed to resolve.
 FORM_TOKENS = frozenset({
+    # single-letter abbreviations. "T Allegra 120mg" and "T. Pantocid 40" are
+    # how prescriptions are actually written; without these, every such line
+    # failed to resolve even when the brand was in the table.
+    "t", "tb", "c", "cp",
     # oral solids
     "tab", "tabs", "tablet", "tablets", "cap", "caps", "capsule", "capsules",
     "rotacap", "rotacaps", "sachet", "powder", "pwd", "granules",
@@ -426,6 +430,24 @@ def _assign_strengths(
     if len(molecules) != 1:
         return ()
     return parsed
+
+
+def match_tokens(brand_text: str) -> tuple[str, ...]:
+    """The tokens matching actually runs on, after everything droppable is gone.
+
+    Exposed because callers need to decide whether two written readings refer to
+    the same drug even when neither resolves. Keying an unresolved brand on its
+    raw words makes "T Allegra 120g" and "T Allegra 120mg" look like two
+    different medications; keying on these tokens does not.
+    """
+    raw = _tokenise(brand_text)
+    if not raw:
+        return ()
+    head = _strip_tail(raw)
+    if _match_exact(head) is not None:
+        return tuple(head)
+    stripped = _strip_tail(_strip_forms(raw))
+    return tuple(stripped or head)
 
 
 def resolve(brand_text: str) -> BrandResolution:

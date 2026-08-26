@@ -33,7 +33,7 @@ python3 -m venv .venv
 ./.venv/bin/python -m pip install -e '.[dev]'
 ```
 
-Run the test suite (231 tests):
+Run the test suite (245 tests):
 
 ```bash
 ./.venv/bin/python -m pytest -q
@@ -121,22 +121,35 @@ The brand table is the second net. Both reads agreeing on garbage is still
 garbage, and an unresolvable reading never becomes medication state (SR-5)
 whatever its agreement.
 
-### Thinking is an escalation, not a setting
+### Three cheap reads beat thinking
 
-| | recall | cost/image | thinking tokens |
-|---|---|---|---|
-| `thinkingBudget: 0` | 74.3% | $0.0033 | 0 |
-| default (thinking on) | 82.9% | $0.0729 | 1,061 – 62,910 |
+Measured over the same ten prescriptions:
 
-Thinking buys 8.6 points of recall for roughly 22× the cost — but on the sample
-the entire gain came from **one image in ten** (2/6 → 5/6 drugs); the other nine
-were identical. Spend is bimodal: median 1,840 tokens, spiking to 62,910. So
-thinking runs only when the two cheap reads disagree. Nonzero `thinkingBudget`
-values are silently ignored (256 and 1024 both produced ~62,911 tokens on the
-same image), so it is effectively a boolean.
+| configuration | recall | cost/image | wall (10 images) | lines flagged |
+|---|---|---|---|---|
+| 1 cheap read | 74.3% | $0.0033 | — | none possible |
+| 2 reads + thinking escalation | 80.0% | $0.0680 | 219s | 1 of 35 |
+| always thinking | 82.9% | $0.0729 | 284s | unusable |
+| **3 cheap reads (shipped)** | **82.9%** | **$0.0162** | **20s** | **15 of 42** |
 
-Measured cost of the shipped configuration: **$0.013** for a two-read
-prescription with bounding boxes, about $0.03 when it escalates.
+Three independently framed cheap reads match the recall of always-thinking at a
+quarter of the cost and a fourteenth of the wall time — and calibrate far
+better, flagging 15 lines of 42 rather than 1 of 35.
+
+They also remove a cost tail that a per-patient budget cannot absorb. Thinking
+spend is **bimodal**: median 1,840 tokens, spiking to 62,910. One escalation in
+ten images cost $0.58 on its own, which is the entire NFR-2 monthly allowance
+for a patient. Nonzero `thinkingBudget` values are silently ignored (256 and
+1024 both produced ~62,911 tokens on one image), so it is effectively a boolean
+and the spend cannot be capped. The escalation path is kept and tested, but off.
+
+### A limit worth naming
+
+Agreement detects disagreement, not shared omission. A drug that every read
+misses produces no line at all, so it cannot be flagged — it is simply absent,
+and at 82.9% recall roughly one drug in six is. The confirmation loop surfaces
+what was read badly; it cannot surface what was never seen. Nothing in this
+codebase fixes that, and a caregiver should not be told the list is complete.
 
 ## The idea in one function
 

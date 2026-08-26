@@ -248,43 +248,66 @@ def test_usage_is_summed_across_reads():
 
 
 # ==========================================================================
-# Escalation
+# Reads and escalation
 # ==========================================================================
 
-def test_agreeing_cheap_reads_do_not_spend_a_thinking_call():
-    t = FakeTransport(read(med("Telma 40")), read(med("Telma 40")))
+def test_three_independently_framed_reads_by_default():
+    """Independence comes from the framing. Reads at temperature 0 sharing one
+    prompt would be the same read repeated and the signal would be vacuous."""
+    assert len(CHEAP_PROMPTS) == 3
+    assert len(set(CHEAP_PROMPTS)) == 3
+    t = FakeTransport(*[read(med("Telma 40")) for _ in range(3)])
+    extract(b"img", transport=t)
+    assert len({prompt for prompt, _ in t.calls}) == 3
+
+
+def test_thinking_is_off_by_default():
+    """It bought nothing over a third cheap prompt and carried a cost tail a
+    per-patient budget cannot absorb."""
+    t = FakeTransport(*[read(med("Telma 40")) for _ in range(3)])
     result = extract(b"img", transport=t)
-    assert len(t.calls) == 2
-    assert [thinking for _, thinking in t.calls] == [False, False]
+    assert [thinking for _, thinking in t.calls] == [False, False, False]
     assert result.escalated is False
+    assert result.usage.thinking_tokens == 0
 
 
-def test_disagreeing_cheap_reads_escalate_once():
+def test_disagreement_alone_does_not_spend_a_thinking_call():
     t = FakeTransport(
         read(med("Telma 40")),
-        read(med("Telma 40"), med("Glycomet 500")),
-        read(med("Telma 40"), med("Glycomet 500")),
+        read(med("Telma 40"), med("Pan 40")),
+        read(med("Telma 40")),
     )
     result = extract(b"img", transport=t)
     assert len(t.calls) == 3
-    assert t.calls[2][1] is True
-    assert result.escalated is True
-
-
-def test_escalation_can_be_switched_off():
-    t = FakeTransport(read(med("Telma 40")), read(med("Telma 40"), med("Pan 40")))
-    result = extract(b"img", transport=t, escalate=False)
-    assert len(t.calls) == 2
     assert result.escalated is False
 
 
-def test_the_two_cheap_reads_use_different_prompts():
-    """Independence comes from the framing. Two reads at temperature 0 with the
-    same prompt would be the same read twice and the signal would be vacuous."""
-    assert len(set(CHEAP_PROMPTS)) == 2
+def test_escalation_when_explicitly_requested():
+    """The path is kept and tested: it is the right lever if a harder document
+    class turns up, even though it is not the default."""
+    t = FakeTransport(
+        read(med("Telma 40")),
+        read(med("Telma 40"), med("Pan 40")),
+        read(med("Telma 40")),
+        read(med("Telma 40"), med("Pan 40"), thinking=True),
+    )
+    result = extract(b"img", transport=t, escalate=True)
+    assert len(t.calls) == 4
+    assert t.calls[3][1] is True
+    assert result.escalated is True
+
+
+def test_agreeing_reads_never_escalate_even_when_asked():
+    t = FakeTransport(*[read(med("Telma 40")) for _ in range(3)])
+    result = extract(b"img", transport=t, escalate=True)
+    assert len(t.calls) == 3
+    assert result.escalated is False
+
+
+def test_a_custom_prompt_set_is_honoured():
     t = FakeTransport(read(med("Telma 40")), read(med("Telma 40")))
-    extract(b"img", transport=t)
-    assert t.calls[0][0] != t.calls[1][0]
+    extract(b"img", transport=t, prompts=CHEAP_PROMPTS[:2])
+    assert len(t.calls) == 2
 
 
 def test_reads_disagree_detects_set_differences_only():
@@ -292,6 +315,20 @@ def test_reads_disagree_detects_set_differences_only():
     assert reads_disagree(same) is False
     diff = [read(med("Telma 40")), read(med("Telma 40"), med("Pan 40"))]
     assert reads_disagree(diff) is True
+
+
+def test_two_of_three_reads_is_medium_and_one_is_low():
+    """The calibration that matters: three reads give a gate that fires."""
+    t = FakeTransport(
+        read(med("Telma 40"), med("Pan 40"), med("Metolar 25")),
+        read(med("Telma 40"), med("Pan 40")),
+        read(med("Telma 40")),
+    )
+    result = extract(b"img", transport=t)
+    by_brand = {ln.brand_text: ln.confidence for ln in result.lines}
+    assert by_brand["Telma 40"] is Confidence.HIGH
+    assert by_brand["Pan 40"] is Confidence.MEDIUM
+    assert by_brand["Metolar 25"] is Confidence.LOW
 
 
 # ==========================================================================
@@ -378,8 +415,31 @@ def test_a_continuation_prefix_does_not_split_one_drug_into_two():
     assert result.lines[0].confidence is Confidence.HIGH
 
 
-def test_transcription_noise_does_not_trigger_a_needless_escalation():
-    t = FakeTransport(read(med("Cont. Tab Telma 40")), read(med("TELMA 40MG TAB")))
+def test_transcription_noise_does_not_split_a_line_across_reads():
+    t = FakeTransport(read(med("Cont. Tab Telma 40")),
+                      read(med("TELMA 40MG TAB")),
+                      read(med("Tab. Telma 40mg OD")))
     result = extract(b"img", transport=t)
-    assert len(t.calls) == 2
-    assert result.escalated is False
+    assert len(result.lines) == 1
+    assert result.lines[0].confidence is Confidence.HIGH
+
+
+def test_a_strength_unit_disagreement_does_not_invent_a_medication():
+    """Regression from a live run on rx-077.
+
+    One read wrote "T Cepodem 200g" and another "T Cepodem 200mg". Neither
+    brand is in the table, and keying on raw words made them two different
+    medications — a phantom drug at LOW beside the real one at MEDIUM.
+    """
+    assert line_key("T Cepodem 200g") == line_key("T Cepodem 200mg")
+    assert line_key("T. Domstal (10)") == line_key("T. Domstal")
+    result = combine([read(med("T Cepodem 200g", dose_pattern="BD")),
+                      read(med("T Cepodem 200mg", dose_pattern="BD")),
+                      read(med("T Cepodem 200 mg", dose_pattern="BD"))])
+    assert len(result.lines) == 1
+    assert result.lines[0].confidence is Confidence.HIGH
+
+
+def test_an_unknown_brand_is_still_distinguished_from_a_different_one():
+    """Convergence must not go so far that two real drugs merge."""
+    assert line_key("T Cepodem 200mg") != line_key("T Valavir 1gm")
