@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Parchi</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:wght@400;500&family=Public+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400&display=swap">
+<style>
+  :root{--ink:#16213A;--soft:#3D4A63;--ground:#FBFAF7;--panel:#F4F2EC;--rule:#D8D4CB;
+        --label:#6E6A61;--stamp:#A63A2B;--stamp-bg:#F6E9E5;--ok:#2F6B52;--ok-bg:#E6EFE9;
+        --warn:#8A6D1F;--warn-bg:#F5EEDA;
+        --sans:"Public Sans",system-ui,sans-serif;--serif:"Newsreader",Georgia,serif;
+        --mono:"IBM Plex Mono",Menlo,monospace;}
+  @media (prefers-color-scheme:dark){:root{--ink:#E8E4DA;--soft:#A8A69E;--ground:#14161A;
+        --panel:#1C1F25;--rule:#333841;--label:#8E8B83;--stamp:#E08A76;--stamp-bg:#2E1F1C;
+        --ok:#79B396;--ok-bg:#18261F;--warn:#C9A652;--warn-bg:#262016;}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);
+       font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:44rem;margin:0 auto;padding:1.25rem 1rem 1rem;flex:1}
+  body{display:flex;flex-direction:column;min-height:100vh}
+  header{border-bottom:1px solid var(--rule);padding-bottom:.9rem;margin-bottom:1.1rem}
+  h1{font-family:var(--serif);font-weight:500;font-size:1.9rem;margin:0 0 .15rem;letter-spacing:-.01em}
+  .tag{font-family:var(--mono);font-size:.65rem;letter-spacing:.13em;text-transform:uppercase;color:var(--label)}
+  .disclaim{font-size:.82rem;color:var(--soft);margin:.5rem 0 0}
+  h2{font-family:var(--mono);font-size:.65rem;letter-spacing:.13em;text-transform:uppercase;
+     color:var(--label);margin:1.6rem 0 .5rem;font-weight:400}
+  .card{border:1px solid var(--rule);background:var(--ground)}
+  .row{padding:.6rem .8rem;border-bottom:1px solid var(--rule)}
+  .row:last-child{border-bottom:none}
+  .med{display:flex;justify-content:space-between;gap:.6rem;align-items:baseline;flex-wrap:wrap}
+  .med b{font-weight:600}
+  .med .meta{font-family:var(--mono);font-size:.7rem;color:var(--label)}
+  .pill{font-family:var(--mono);font-size:.6rem;letter-spacing:.08em;text-transform:uppercase;
+        padding:.1rem .35rem;border-left:3px solid currentColor}
+  .pill.a{color:var(--ok);background:var(--ok-bg)}
+  .pill.u{color:var(--warn);background:var(--warn-bg)}
+  .pill.s{color:var(--stamp);background:var(--stamp-bg)}
+  .q{padding:.7rem .8rem;border-bottom:1px solid var(--rule)}
+  .q:last-child{border-bottom:none}
+  .q .obs{font-size:.88rem}
+  .q .ask{font-family:var(--serif);font-size:1rem;margin-top:.3rem}
+  .q .src{font-family:var(--mono);font-size:.65rem;color:var(--label);margin-top:.3rem}
+  #log{display:flex;flex-direction:column;gap:.7rem;margin:.6rem 0 0}
+  .msg{max-width:90%;padding:.6rem .8rem;border:1px solid var(--rule);white-space:pre-wrap}
+  .msg.me{align-self:flex-end;background:var(--panel)}
+  .msg.it{align-self:flex-start}
+  .msg .who{font-family:var(--mono);font-size:.6rem;letter-spacing:.1em;text-transform:uppercase;
+            color:var(--label);display:block;margin-bottom:.25rem}
+  .tools{font-family:var(--mono);font-size:.62rem;color:var(--label);margin-top:.4rem}
+  /* Sticky, not fixed: a fixed composer anchors to the wrong box inside an
+     embedded viewport and covers the newest reply. */
+  form{position:sticky;bottom:0;background:var(--ground);
+       border-top:1px solid var(--rule);padding:.7rem 1rem;display:flex;gap:.5rem}
+  form .inner{max-width:44rem;margin:0 auto;display:flex;gap:.5rem;width:100%}
+  input{flex:1;font-family:var(--sans);font-size:15px;padding:.55rem .7rem;
+        border:1px solid var(--rule);background:var(--ground);color:var(--ink);border-radius:2px}
+  input:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
+  button{font-family:var(--mono);font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;
+         padding:.55rem .9rem;border:1px solid var(--ink);background:var(--ink);
+         color:var(--ground);cursor:pointer;border-radius:2px}
+  button[disabled]{opacity:.5;cursor:default}
+  .chips{display:flex;gap:.4rem;flex-wrap:wrap;margin:.6rem 0 0}
+  .chips button{background:transparent;color:var(--soft);border-color:var(--rule);text-transform:none;
+                font-family:var(--sans);font-size:.78rem;letter-spacing:0}
+  .withheld{border-left:3px solid var(--stamp);background:var(--stamp-bg)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <p class="tag">Constructed fixture · no real patient data</p>
+    <h1>Parchi</h1>
+    <p class="disclaim">Observations and questions from your family's paperwork. Not medical advice — every line names the document it came from.</p>
+  </header>
+
+  <h2>Current medications</h2>
+  <div class="card" id="meds"><div class="row">Loading…</div></div>
+
+  <h2>Questions worth asking</h2>
+  <div class="card" id="questions"><div class="row">Loading…</div></div>
+
+  <h2>Ask about the record</h2>
+  <div class="chips">
+    <button type="button" data-q="What is my father taking right now?">What is he taking?</button>
+    <button type="button" data-q="What should I ask at tomorrow's appointment?">Ask at the appointment?</button>
+    <button type="button" data-q="Show me his HbA1c trend.">HbA1c trend</button>
+    <button type="button" data-q="Which readings do you need me to confirm?">Anything to confirm?</button>
+  </div>
+  <div id="log"></div>
+</div>
+
+<form id="ask">
+  <div class="inner">
+    <input id="msg" placeholder="Ask about the paperwork…" autocomplete="off" aria-label="Your question">
+    <button type="submit" id="send">Send</button>
+  </div>
+</form>
+
+<script>
+const PATIENT = "p-fixture-1";
+let session = null;
+const log = document.getElementById("log");
+
+function esc(s){const d=document.createElement("div");d.textContent=s??"";return d.innerHTML;}
+
+async function boot(){
+  try{ await fetch("/api/seed",{method:"POST"}); }catch(e){}
+  try{
+    const r = await fetch("/api/record/"+PATIENT);
+    const d = await r.json();
+    // Current drugs first. Alphabetical order puts a finished antibiotic above
+    // what the parent is actually taking today.
+    const rank = {ACTIVE:0, LIKELY_ACTIVE:1, POSSIBLY_STOPPED:2, UNCERTAIN:3,
+                  COURSE_COMPLETED:4};
+    const meds = (d.medications.medications || []).slice().sort((a,b)=>
+      (rank[a.status]??9)-(rank[b.status]??9) || a.molecule.localeCompare(b.molecule));
+    document.getElementById("meds").innerHTML = meds.length ? meds.map(m=>{
+      const cls = m.taking_now ? "a" : (m.status==="UNCERTAIN" ? "u" : "s");
+      const st = m.strength_mg!=null ? m.strength_mg+" mg" : "strength not attributable";
+      return `<div class="row"><div class="med"><span><b>${esc(m.molecule)}</b> — ${esc(st)}</span>
+        <span class="pill ${cls}">${esc(m.status.replace(/_/g," "))}</span></div>
+        <div class="meta">as ${esc(m.written_as||"—")} · ${esc((m.prescribers||[]).join(", ")||"unattributed")} · last written ${esc(m.last_written)} · ${esc((m.evidence||[]).join(", "))}</div>
+        ${m.open_question?`<div class="meta">? ${esc(m.open_question)}</div>`:""}</div>`;
+    }).join("") : '<div class="row">Nothing readable yet.</div>';
+
+    const qs = d.questions.questions || [];
+    document.getElementById("questions").innerHTML = qs.length ? qs.map(q=>
+      `<div class="q"><div class="obs">${esc(q.observed)}</div>
+       <div class="ask">${esc(q.ask)}</div>
+       <div class="src">${esc(q.attention.replace(/_/g," "))} · source ${esc((q.evidence||[]).join(", "))}</div></div>`
+    ).join("") : '<div class="row">Nothing outstanding.</div>';
+  }catch(e){
+    document.getElementById("meds").innerHTML='<div class="row">Could not load the record.</div>';
+  }
+}
+
+function add(who, text, cls){
+  const el=document.createElement("div");
+  el.className="msg "+(cls||"");
+  el.innerHTML=`<span class="who">${esc(who)}</span>${esc(text)}`;
+  log.appendChild(el);
+  el.scrollIntoView({block:"nearest"});
+  return el;
+}
+
+async function send(text){
+  if(!text.trim()) return;
+  add("You", text, "me");
+  const input=document.getElementById("msg"), btn=document.getElementById("send");
+  input.value=""; input.disabled=true; btn.disabled=true;
+  const pending=add("Parchi","Reading the paperwork…","it");
+  try{
+    const r=await fetch("/api/ask",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({message:text,patient_id:PATIENT,session_id:session})});
+    const d=await r.json();
+    session=d.session_id||session;
+    pending.innerHTML=`<span class="who">Parchi</span>${esc(d.reply)}`;
+    if(d.withheld_phrases){
+      pending.classList.add("withheld");
+      pending.innerHTML+=`\n\n${esc(d.findings||"")}`;
+    }
+    if(d.tools_used&&d.tools_used.length){
+      const t=document.createElement("div"); t.className="tools";
+      t.textContent="agents: "+d.tools_used.join(" → ");
+      pending.appendChild(t);
+    }
+  }catch(e){
+    pending.innerHTML='<span class="who">Parchi</span>Could not reach the service. Try again.';
+  }finally{
+    input.disabled=false; btn.disabled=false; input.focus();
+  }
+}
+
+document.getElementById("ask").addEventListener("submit",e=>{
+  e.preventDefault(); send(document.getElementById("msg").value);
+});
+document.querySelectorAll(".chips button").forEach(b=>
+  b.addEventListener("click",()=>send(b.dataset.q)));
+boot();
+</script>
+</body>
+</html>

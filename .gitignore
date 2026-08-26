@@ -5,3 +5,5 @@ __pycache__/
 .env
 fixtures/private/
 fixtures/external/
+.env.local
+.env*.local
