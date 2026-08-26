@@ -263,3 +263,57 @@ def test_strength_still_suppressed_for_a_real_combination():
     r = resolve("JANUMET 50/1000MG TAB")
     assert len(r.molecules) == 2
     assert r.strengths_mg == ()
+
+
+# -- strength parsing against real prescription notation -------------------
+
+@pytest.mark.parametrize(
+    "written,expected",
+    [
+        ("THYRONORM 62.5MCG TAB", (0.0625,)),     # 62.5 mcg
+        ("Telma 12.5 mg", (12.5,)),
+        ("Glycomet 1.5 g", (1500.0,)),
+        ("Pan 40.5", (40.5,)),
+    ],
+)
+def test_decimal_strengths_survive_tokenisation(written, expected):
+    """A dot between digits is a decimal point, not punctuation to strip.
+
+    Regression: "0.3mg" tokenised to ["0", "3mg"] and "62.5mcg" to ["62",
+    "5mcg"]. For a single-molecule product that produced silence, which is safe
+    but wrong; for a combination whose molecule count happened to match the
+    broken parse it would have reported a tenfold strength error.
+    """
+    assert resolve(written).strengths_mg == expected
+
+
+@pytest.mark.parametrize(
+    "written,expected",
+    [
+        ("Tab Telma 40 1 OD", (40.0,)),
+        ("Pan 40 1 BD", (40.0,)),
+        ("Ecosprin 75 1 OD", (75.0,)),
+        ("Telma 40mg 1 OD", (40.0,)),
+        ("Metolar 25 2 BD", (25.0,)),
+    ],
+)
+def test_quantity_before_a_frequency_is_not_a_strength(written, expected):
+    """"Tab Telma 40 1 OD" is one tablet once daily, not 40 mg and 1 mg.
+
+    Regression: counting the quantity as a second strength pushed the §6.4
+    parallel-count test out of parity and discarded the real strength.
+    """
+    assert resolve(written).strengths_mg == expected
+
+
+@pytest.mark.parametrize("written", ["Telma 40 OD", "Pan 40 BD", "Metolar 25 HS"])
+def test_a_lone_number_before_a_frequency_is_still_the_strength(written):
+    """The quantity reading applies only once a strength has been seen."""
+    assert len(resolve(written).strengths_mg) == 1
+
+
+def test_quantity_handling_does_not_rescue_a_combination():
+    """Still two molecules and still no attribution. §6.4 holds."""
+    r = resolve("Tab Janumet 50/1000 1 BD")
+    assert r.molecules == ("sitagliptin", "metformin")
+    assert r.strengths_mg == ()

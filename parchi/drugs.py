@@ -175,10 +175,21 @@ _STRENGTH_RE = re.compile(
 _MG_FACTORS = {None: 1.0, "mg": 1.0, "g": 1000.0, "gm": 1000.0, "mcg": 0.001}
 
 
+_DECIMAL_GUARD = "\x00"
+
+
 def _tokenise(text: str) -> list[str]:
-    """Lowercase, split on whitespace and separators, drop stray punctuation."""
-    cleaned = re.sub(r"[-/+,.()\[\]]", " ", (text or "").lower())
-    return [t for t in cleaned.split() if t]
+    """Lowercase, split on separators, drop stray punctuation.
+
+    A dot between two digits is a decimal point and must survive. Stripping it
+    with the rest of the punctuation turned "0.3mg" into the two numbers 0 and
+    3, and "62.5mcg" into 62 and 5 — a tenfold strength error waiting for a
+    combination product whose molecule count happened to match.
+    """
+    lowered = (text or "").lower()
+    guarded = re.sub(r"(?<=\d)\.(?=\d)", _DECIMAL_GUARD, lowered)
+    cleaned = re.sub(r"[-/+,.()\[\]]", " ", guarded)
+    return [t.replace(_DECIMAL_GUARD, ".") for t in cleaned.split() if t]
 
 
 def _strength_match(token: str) -> re.Match | None:
@@ -216,6 +227,13 @@ def _parse_strengths_mg(tokens: list[str]) -> tuple[float, ...]:
     if any strength carries a unit that is not mg-convertible — a partially
     converted list would break the parallel-count contract in §6.4, and silence
     is the correct answer.
+
+    A bare number immediately before a dose-frequency word is a QUANTITY, not a
+    strength: prescriptions read "Tab Telma 40 1 OD" — one tablet, once daily.
+    Counting that 1 as a second strength pushed the parallel-count test out of
+    parity and threw away the real 40 mg. The quantity reading applies only
+    when a strength has already been seen, so "Telma 40 OD" still reads 40 as
+    the strength.
     """
     out: list[float] = []
     i = 0
@@ -228,6 +246,14 @@ def _parse_strengths_mg(tokens: list[str]) -> tuple[float, ...]:
         if unit is None and i + 1 < len(tokens) and tokens[i + 1] in UNIT_TOKENS:
             unit = tokens[i + 1]
             i += 1
+        elif (
+            unit is None
+            and out
+            and i + 1 < len(tokens)
+            and tokens[i + 1] in FREQUENCY_TOKENS
+        ):
+            i += 1          # a quantity, e.g. the "1" in "40 1 OD"
+            continue
         if unit not in _MG_FACTORS:
             return ()
         out.append(float(m.group("num")) * _MG_FACTORS[unit])
