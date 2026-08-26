@@ -491,3 +491,118 @@ def test_no_follow_up_written_means_none_invented():
     result = combine([read(med("Telma 40")), read(med("Telma 40"))])
     assert result.follow_up_text is None
     assert result.follow_up_on is None and result.follow_up_after_days is None
+
+
+# ==========================================================================
+# Lab results — §9.1's automatic path
+# ==========================================================================
+
+def lab(analyte, value, unit, low=None, high=None):
+    d = {"analyte_raw": analyte, "value": value, "unit_raw": unit}
+    if low is not None:
+        d["ref_low"] = low
+    if high is not None:
+        d["ref_high"] = high
+    return d
+
+
+def lab_read(*rows, thinking=False, lab_name="SRL"):
+    return RawRead(
+        payload={"document_kind": "lab_report", "medications": [],
+                 "lab_name": lab_name, "lab_results": list(rows)},
+        usage=Usage(calls=1, input_tokens=1000, output_tokens=200),
+        thinking=thinking)
+
+
+def test_a_results_table_is_read_and_agreed_on():
+    result = combine([
+        lab_read(lab("HbA1c", 8.4, "%", 4.0, 5.6)),
+        lab_read(lab("HBA1C (Glycosylated Hb)", 8.4, "%", 4.0, 5.6)),
+    ])
+    assert len(result.lab_values) == 1
+    v = result.lab_values[0]
+    assert v.value == 8.4 and v.unit_raw == "%"
+    assert v.confidence is Confidence.HIGH   # same analyte, both reads
+    assert result.lab_name == "SRL"
+
+
+def test_a_disputed_number_is_low_confidence_however_many_reads_saw_it():
+    """A disagreement about a value is more serious than one about a name."""
+    result = combine([
+        lab_read(lab("Creatinine", 1.2, "mg/dL")),
+        lab_read(lab("S. Creatinine", 7.2, "mg/dL")),
+    ])
+    assert len(result.lab_values) == 1
+    v = result.lab_values[0]
+    assert v.value_disputed is True
+    assert v.confidence is Confidence.LOW
+    assert any("different numbers" in n for n in result.notes)
+
+
+def test_a_row_seen_by_one_read_only_is_low_confidence():
+    result = combine([
+        lab_read(lab("HbA1c", 8.4, "%"), lab("Creatinine", 1.2, "mg/dL")),
+        lab_read(lab("HbA1c", 8.4, "%")),
+    ])
+    by = {v.analyte_raw: v for v in result.lab_values}
+    assert by["HbA1c"].confidence is Confidence.HIGH
+    assert by["Creatinine"].confidence is Confidence.LOW
+
+
+def test_malformed_rows_are_skipped_not_guessed():
+    result = combine([lab_read(
+        lab("HbA1c", 8.4, "%"),
+        {"analyte_raw": "", "value": 1, "unit_raw": "%"},
+        {"analyte_raw": "Creatinine", "unit_raw": "mg/dL"},          # no value
+        {"analyte_raw": "Glucose", "value": "high", "unit_raw": "mg/dL"},
+    )])
+    assert [v.analyte_raw for v in result.lab_values] == ["HbA1c"]
+
+
+def test_extracted_rows_normalise_into_lab_results():
+    from parchi.extract import to_lab_results
+
+    result = combine([
+        lab_read(lab("Glycosylated Haemoglobin", 64, "mmol/mol", 20, 42),
+                 lab_name="Metropolis"),
+        lab_read(lab("HbA1c", 64, "mmol/mol", 20, 42), lab_name="Metropolis"),
+    ])
+    results, problems = to_lab_results(
+        result, document_id="LR3", doc_date=date(2026, 3, 8))
+    assert problems == ()
+    assert len(results) == 1
+    r = results[0]
+    assert r.analyte == "hba1c"
+    assert r.value == 64 and r.unit_raw == "mmol/mol"     # raw kept (§8)
+    assert r.canonical_value == 8.01                       # NGSP master equation
+    assert (r.ref_low, r.ref_high) == (3.98, 5.99)         # converted alongside
+    assert r.lab_name == "Metropolis"
+
+
+def test_an_unverifiable_unit_is_refused_rather_than_converted():
+    from parchi.extract import to_lab_results
+
+    result = combine([lab_read(lab("HbA1c", 8.4, "furlongs")),
+                      lab_read(lab("HbA1c", 8.4, "furlongs"))])
+    results, problems = to_lab_results(
+        result, document_id="LR9", doc_date=date(2026, 3, 8))
+    assert results == ()
+    assert len(problems) == 1
+    assert "no verified conversion" in problems[0]["problem"]
+
+
+def test_an_unrecognised_test_name_is_refused():
+    from parchi.extract import to_lab_results
+
+    result = combine([lab_read(lab("Zorblax Index", 3.0, "mg/dL")),
+                      lab_read(lab("Zorblax Index", 3.0, "mg/dL"))])
+    results, problems = to_lab_results(
+        result, document_id="LR9", doc_date=date(2026, 3, 8))
+    assert results == ()
+    assert "not recognised" in problems[0]["problem"]
+
+
+def test_a_prescription_yields_no_lab_values():
+    result = combine([read(med("Telma 40")), read(med("Telma 40"))])
+    assert result.lab_values == ()
+    assert result.lab_name is None

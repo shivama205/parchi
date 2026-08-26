@@ -33,7 +33,7 @@ python3 -m venv .venv
 ./.venv/bin/python -m pip install -e '.[dev]'
 ```
 
-Run the test suite (332 tests):
+Run the test suite (345 tests):
 
 ```bash
 ./.venv/bin/python -m pytest -q
@@ -94,6 +94,7 @@ measure of how demo-grade the table is.
 | Reconciliation rules (§6) | `parchi/reconcile.py` | Done |
 | Safety invariants SR-1…SR-9 (§11) | enforced in models + `tests/` | Done |
 | Lab unit conversion (§8) | `parchi/labs.py` | Done — every factor cited |
+| Lab value extraction (§9.1) | `parchi/extract.py` | Done |
 | Extraction (§9) | `parchi/extract.py` | Done — agreement-based confidence |
 | Bulk ingestion + timeline (AC-1) | `parchi/server.py` | Done |
 | Printed fixture generator | `make_documents.py` | Done — 13 documents |
@@ -150,6 +151,31 @@ ten images cost $0.58 on its own, which is the entire NFR-2 monthly allowance
 for a patient. Nonzero `thinkingBudget` values are silently ignored (256 and
 1024 both produced ~62,911 tokens on one image), so it is effectively a boolean
 and the spend cannot be capped. The escalation path is kept and tested, but off.
+
+### A claim is not a name
+
+SR-1 forbids clinical-claim vocabulary in anything a caregiver sees, and
+"diagnos" is on the list so that "diagnosis" and "diagnostic" cannot slip
+through. The first time a real laboratory name reached a finding, reconciliation
+crashed: a major Indian chain is called **SRL Diagnostics**, and most Indian
+labs are named that way — so any patient using one would have brought the
+service down.
+
+The fix is not to mangle the name. SR-1 exists to stop Parchi asserting
+something clinical, not to stop it saying where a test was run. Quoted text is
+now handled in two kinds:
+
+- **A proper noun we matched** — a laboratory, a prescriber, a brand in the
+  table — is declared in  and masked before the scan, then shown
+  intact.
+- **A reading that resolved to nothing** is arbitrary model output about an
+  unreadable scrawl and can say anything, so forbidden vocabulary in it is
+  redacted. Quotation marks are not much defence when someone is skimming a
+  phone at a bus stop.
+
+Masking cannot be used as a loophole: the words around a name are still
+scanned, so a finding saying "you should stop taking it" fails whatever names
+it carries. There is a test for both directions.
 
 ### A limit worth naming
 

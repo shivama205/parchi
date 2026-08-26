@@ -364,6 +364,9 @@ def _duplicate_molecule_findings(
                     sorted(p.mention.doc_date for p in products)
                 ),
                 molecules=(state.molecule,),
+                quoted_names=tuple(
+                    v for p in products
+                    for v in (p.mention.brand_text, p.mention.prescriber) if v),
             )
         )
     return out
@@ -431,6 +434,7 @@ def _parallel_prescribing_findings(
             ),
             evidence=tuple(sorted({i for n in involved for i in ids[n]})),
             molecules=tuple(sorted({m for n in involved for m in by_prescriber[n]})),
+            quoted_names=tuple(involved),
         )
     ]
 
@@ -468,6 +472,8 @@ def _dropped_without_stop_findings(
                 evidence=(last.id,),
                 evidence_dates=(last.doc_date, rewrite.doc_date),
                 molecules=(state.molecule,),
+                quoted_names=tuple(
+                    v for v in (rewrite.prescriber, last.brand_text) if v),
             )
         )
     return out
@@ -509,6 +515,7 @@ def _dose_changed_findings(
                     evidence=(earlier.id, later.id),
                     evidence_dates=(earlier.doc_date, later.doc_date),
                     molecules=(molecule,),
+                    quoted_names=(prescriber,),
                 )
             )
     return out
@@ -545,6 +552,9 @@ def _needs_confirmation_findings(
                 evidence=(m.id,),
                 evidence_dates=(m.doc_date,),
                 molecules=m.molecules,
+                # `quoted` is already redacted by safe_quote — it is arbitrary
+                # OCR, not a name. Only the prescriber needs masking.
+                quoted_names=tuple(v for v in (m.prescriber,) if v),
             )
         )
     return out
@@ -600,6 +610,8 @@ def _lab_findings(series: tuple[LabSeries, ...]) -> list[Finding]:
                     ),
                     evidence=(earlier.id, later.id),
                     evidence_dates=(earlier.doc_date, later.doc_date),
+                    quoted_names=tuple(
+                        n for n in (earlier.lab_name, later.lab_name) if n),
                 )
             )
         # LAB_TREND — three or more points, monotonic across the series.
@@ -624,6 +636,7 @@ def _lab_findings(series: tuple[LabSeries, ...]) -> list[Finding]:
                 question=f"Has the {name} trend been reviewed?",
                 evidence=tuple(p.id for p in s.points),
                 evidence_dates=tuple(p.doc_date for p in s.points),
+                quoted_names=tuple(labs),
             )
         )
     return out

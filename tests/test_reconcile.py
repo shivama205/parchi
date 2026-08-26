@@ -683,3 +683,99 @@ def test_a_single_unreadable_document_yields_only_a_question():
     assert r.states == ()
     assert len(r.findings) == 1
     assert r.findings[0].kind is FindingKind.NEEDS_CONFIRMATION
+
+
+# ==========================================================================
+# SR-1 and proper nouns — a claim is not a name
+# ==========================================================================
+
+def test_sr1_allows_a_laboratory_whose_name_contains_a_forbidden_stem():
+    """Regression, found the first time a real lab name reached a finding.
+
+    A major Indian chain is called SRL Diagnostics. "Diagnostics" contains
+    "diagnos", and SR-1 brought reconciliation down with a ClinicalClaimError.
+    Most Indian labs are named that way, so any patient using one would have
+    crashed the service.
+    """
+    from dataclasses import replace as dc_replace
+
+    from parchi.models import Attention
+
+    labs = tuple(dc_replace(r, lab_name="SRL Diagnostics") if r.id == "L6"
+                 else dc_replace(r, lab_name="Metropolis Diagnostics")
+                 for r in LAB_RESULTS)
+    r = reconcile([], as_of=AS_OF, lab_results=labs)
+    duplicate = r.findings_of(FindingKind.POSSIBLE_DUPLICATE_TEST)
+    assert len(duplicate) == 1
+    assert "SRL Diagnostics" in duplicate[0].summary
+    assert clinical_claim_phrases_in(
+        duplicate[0].summary, quoted=duplicate[0].quoted_names) == ()
+
+
+def test_masking_a_name_does_not_let_a_real_claim_through():
+    """The distinction has to hold in both directions or it is a loophole."""
+    from parchi.models import Attention
+
+    with pytest.raises(ClinicalClaimError):
+        Finding(kind=FindingKind.LAB_TREND, attention=Attention.FYI,
+                summary="This is diagnostic of kidney disease.",
+                question="Worth asking?",
+                quoted_names=("SRL Diagnostics",))
+    with pytest.raises(ClinicalClaimError):
+        Finding(kind=FindingKind.LAB_TREND, attention=Attention.FYI,
+                summary="You should stop taking it immediately.",
+                question="Worth asking?",
+                quoted_names=("SRL Diagnostics", "Dr Rao"))
+
+
+def test_a_very_short_quoted_name_cannot_mask_anything():
+    """Otherwise a one-character name would blank out arbitrary text."""
+    assert clinical_claim_phrases_in("you should stop", quoted=("a", "")) != ()
+
+
+def test_a_prescriber_named_after_a_forbidden_stem_does_not_crash():
+    """The possibly-stopped question names the prescriber, so the mask has to
+    reach MedicationState and not only Finding."""
+    who = "Sunrise Diagnostics Clinic"
+    r = reconcile(
+        [
+            _m("a", "D1", date(2026, 1, 10), "Telma 40", who),
+            _m("b", "D1", date(2026, 1, 10), "Amlong 5", who),
+            _m("c", "D1", date(2026, 1, 10), "Dytor 10", who),
+            _m("d", "D2", date(2026, 6, 10), "Telma 40", who),
+            _m("e", "D2", date(2026, 6, 10), "Amlong 5", who),
+        ],
+        as_of=AS_OF,
+    )
+    state = r.state_for("torsemide")
+    assert state.status is MedStatus.POSSIBLY_STOPPED
+    assert who in state.open_question
+    assert clinical_claim_phrases_in(
+        state.open_question, quoted=state.prescribers) == ()
+
+
+def test_the_two_kinds_of_quoted_text_are_treated_differently():
+    """A matched proper noun is shown intact; unresolved OCR is redacted.
+
+    Both reach finding copy, and conflating them gets one of two things wrong:
+    mangling "SRL Diagnostics" into nonsense, or printing advice-shaped words
+    to a caregiver on the strength of a guess about an unreadable scrawl.
+    """
+    from dataclasses import replace as dc_replace
+
+    # A name we matched survives.
+    labs = tuple(dc_replace(r, lab_name="SRL Diagnostics") if r.id == "L6"
+                 else dc_replace(r, lab_name="Apex Diagnostics")
+                 for r in LAB_RESULTS)
+    dup = reconcile([], as_of=AS_OF, lab_results=labs).findings_of(
+        FindingKind.POSSIBLE_DUPLICATE_TEST)[0]
+    assert "SRL Diagnostics" in dup.summary
+
+    # An unresolved reading does not.
+    r = reconcile(
+        [_m("x", "D1", AS_OF, "stop taking immediately", MENON,
+            confidence=Confidence.LOW)],
+        as_of=AS_OF)
+    finding = r.findings_of(FindingKind.NEEDS_CONFIRMATION)[0]
+    assert "stop taking" not in finding.summary.lower()
+    assert "[…]" in finding.summary

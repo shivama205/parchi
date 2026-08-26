@@ -122,12 +122,16 @@ class Change:
     detail: str
     evidence: tuple[str, ...]
     evidence_dates: tuple[date, ...] = ()
+    #: Proper nouns copied out of a document — a laboratory, a prescriber, a
+    #: brand. Masked before the SR-1 scan; naming SRL Diagnostics is not
+    #: making a diagnosis. See models.clinical_claim_phrases_in.
+    quoted_names: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.evidence:
             # NFR-5 made structural: no claim without a source.
             raise ValueError(f"change {self.kind.value} for {self.subject!r} cites nothing")
-        hits = clinical_claim_phrases_in(self.detail)
+        hits = clinical_claim_phrases_in(self.detail, quoted=self.quoted_names)
         if hits:
             raise ValueError(f"change detail contains {hits}: {self.detail!r}")
 
@@ -392,6 +396,8 @@ def _changes(before, now, results, since: date) -> tuple[Change, ...]:
                 ),
                 evidence=new_state.evidence_mention_ids,
                 evidence_dates=(new_state.first_seen,),
+                quoted_names=tuple(new_state.prescribers) + tuple(
+                    n for n in (new_state.current_brand_text,) if n),
             ))
         elif (old_state.current_strength_mg is not None
               and new_state.current_strength_mg is not None
@@ -408,6 +414,7 @@ def _changes(before, now, results, since: date) -> tuple[Change, ...]:
                 ),
                 evidence=new_state.evidence_mention_ids,
                 evidence_dates=(old_state.last_mentioned, new_state.last_mentioned),
+                quoted_names=tuple(new_state.prescribers),
             ))
 
     for molecule in sorted(was):
@@ -439,6 +446,7 @@ def _changes(before, now, results, since: date) -> tuple[Change, ...]:
             detail=detail,
             evidence=new_state.evidence_mention_ids,
             evidence_dates=(new_state.last_mentioned,),
+            quoted_names=tuple(new_state.prescribers),
         ))
 
     for r in sorted(results, key=lambda r: (r.doc_date, r.id)):
@@ -459,6 +467,7 @@ def _changes(before, now, results, since: date) -> tuple[Change, ...]:
             ),
             evidence=(r.id,),
             evidence_dates=(r.doc_date,),
+            quoted_names=tuple(n for n in (r.lab_name,) if n),
         ))
 
     # §4 J3 gives the order explicitly: new drugs, stopped drugs, dose changes,

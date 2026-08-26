@@ -36,7 +36,8 @@ from typing import Callable
 
 from .brief import brief_for, build_brief, due_appointments, render_text
 from .drugs import mention_from_reading, resolve
-from .extract import Transport, VertexTransport, extract, to_mentions
+from .extract import (Transport, VertexTransport, extract, to_lab_results,
+                      to_mentions)
 from .labs import normalise_reading as normalise_lab_reading
 from .models import ACTIVE_LIKE, Confidence, MedStatus, analyte_display
 from .reconcile import reconcile
@@ -168,12 +169,23 @@ def tool_read_document(deps: Deps, patient_id: str, document_id: str) -> dict:
     )
     mentions = apply_corrections(deps.store, patient_id, mentions)
     deps.store.put_mentions(patient_id, mentions)
+
+    lab_results, lab_problems = to_lab_results(
+        result, document_id=document_id, doc_date=doc_date,
+        id_prefix=f"{document_id}-L",
+    )
+    if lab_results:
+        deps.store.put_lab_results(patient_id, lab_results)
+
     return {
         "document_id": document_id,
         "kind": result.kind.value,
         "date_on_document": doc_date.isoformat(),
         "read": len(result.lines),
         "stored": len(mentions),
+        "lab_results_stored": len(lab_results),
+        "lab_results_refused": list(lab_problems),
+        "lab_name": result.lab_name,
         "prescriber": doc.prescriber or result.prescriber,
         "follow_up": (result.follow_up_text or None),
         "needs_confirmation": [

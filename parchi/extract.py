@@ -127,6 +127,21 @@ _SCHEMA = {
         "prescriber": {"type": "string", "nullable": True},
         "facility": {"type": "string", "nullable": True},
         "follow_up": {"type": "string", "nullable": True},
+        "lab_name": {"type": "string", "nullable": True},
+        "lab_results": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "analyte_raw": {"type": "string"},
+                    "value": {"type": "number"},
+                    "unit_raw": {"type": "string"},
+                    "ref_low": {"type": "number", "nullable": True},
+                    "ref_high": {"type": "number", "nullable": True},
+                },
+                "required": ["analyte_raw", "value", "unit_raw"],
+            },
+        },
         "medications": {
             "type": "array",
             "items": {
@@ -156,26 +171,38 @@ _CONTRACT = (
     "tightly around that one medication line.\n"
     "- Include every medication order, including ones you find hard to read.\n"
     "- follow_up: copy any instruction to come back, verbatim — a date, or an "
-    "interval like 'review after 2 weeks'. Null if none is written."
+    "interval like 'review after 2 weeks'. Null if none is written.\n"
+    "- If this is a LABORATORY REPORT, leave medications empty and transcribe "
+    "the results table into lab_results instead: the test name exactly as "
+    "printed, the number, the unit exactly as printed, and the reference range "
+    "printed on THIS report. Do not convert units and do not substitute a "
+    "range from memory — a range belongs to the report it is printed on.\n"
+    "- lab_name: the laboratory's name from the header, if this is a report."
 )
 
 #: Two framings, not two samples. Independence has to come from the prompt —
 #: see the module docstring.
 PROMPT_LIST = (
     "This is a medical document from an Indian clinic. Identify what kind of "
-    "document it is, then list every medication order on it.\n\n" + _CONTRACT
+    "document it is, then list everything on it: every medication order if it "
+    "is a prescription, every row of the results table if it is a laboratory "
+    "report.\n\n" + _CONTRACT
 )
 PROMPT_LINEWISE = (
     "This is a medical document from an Indian clinic. Work down the page one "
     "line at a time. For each numbered, bulleted or separately written drug "
-    "order, transcribe that single line. Do not summarise or group lines "
-    "together, and do not skip a line because it is untidy.\n\n" + _CONTRACT
+    "order — or each row of a results table — transcribe that single line. Do "
+    "not summarise or group lines together, and do not skip a line because it "
+    "is untidy.\n\n" + _CONTRACT
 )
 PROMPT_PHARMACIST = (
     "You are a pharmacist about to dispense against this Indian prescription. "
     "Write down exactly what you would take off the shelf, one entry per item "
     "the doctor has ordered. If you could not safely dispense a line because "
-    "you cannot read it, still write down your best reading of it.\n\n"
+    "you cannot read it, still write down your best reading of it. If the "
+    "document is a laboratory report rather than a prescription, switch roles: "
+    "you are the technician checking the printout against the analyser before "
+    "it is released, so transcribe every result exactly as printed.\n\n"
     + _CONTRACT
 )
 
@@ -291,6 +318,32 @@ class ExtractedLine:
 
 
 @dataclass(frozen=True)
+class ExtractedLabValue:
+    """One row of a results table, as printed, before normalisation."""
+
+    analyte_raw: str
+    value: float
+    unit_raw: str
+    ref_low: float | None = None
+    ref_high: float | None = None
+    reads_agreeing: int = 0
+    reads_total: int = 0
+    #: True when the reads returned different numbers for the same analyte.
+    #: A disagreement about a value is more serious than one about a name.
+    value_disputed: bool = False
+
+    @property
+    def confidence(self) -> Confidence:
+        if self.value_disputed or self.reads_total == 0:
+            return Confidence.LOW
+        if self.reads_agreeing == self.reads_total:
+            return Confidence.HIGH
+        if self.reads_agreeing >= 2:
+            return Confidence.MEDIUM
+        return Confidence.LOW
+
+
+@dataclass(frozen=True)
 class ExtractionResult:
     kind: DocumentKind = DocumentKind.UNKNOWN
     date_on_document: str | None = None
@@ -298,6 +351,8 @@ class ExtractionResult:
     prescriber: str | None = None
     facility: str | None = None
     lines: tuple[ExtractedLine, ...] = ()
+    lab_values: tuple[ExtractedLabValue, ...] = ()
+    lab_name: str | None = None
     #: The follow-up instruction as written, and what it resolves to. This is
     #: what makes J3 unprompted: the appointment date comes off a page read
     #: months earlier, not from anything the caregiver does.
@@ -439,6 +494,62 @@ def _lines_from(payload: dict) -> dict[tuple[str, ...], ExtractedLine]:
     return out
 
 
+def lab_key(analyte_raw: str) -> str:
+    """How two reads are judged to have found the same test.
+
+    The canonical analyte where the label is recognised, so "HbA1c" and
+    "HBA1C (Glycosylated Hb)" count as agreement. Otherwise the normalised
+    label, so an unknown test still matches itself without pretending we know
+    what it is.
+    """
+    from .labs import _norm_label, canonical_analyte
+
+    return canonical_analyte(analyte_raw) or _norm_label(analyte_raw)
+
+
+def _lab_rows_from(payload: dict) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for item in payload.get("lab_results") or []:
+        if not isinstance(item, dict):
+            continue
+        label = (item.get("analyte_raw") or "").strip()
+        value = item.get("value")
+        unit = (item.get("unit_raw") or "").strip()
+        if not label or not unit or not isinstance(value, (int, float)):
+            continue
+        key = lab_key(label)
+        if not key or key in out:
+            continue
+        low, high = item.get("ref_low"), item.get("ref_high")
+        out[key] = {
+            "analyte_raw": label,
+            "value": float(value),
+            "unit_raw": unit,
+            "ref_low": float(low) if isinstance(low, (int, float)) else None,
+            "ref_high": float(high) if isinstance(high, (int, float)) else None,
+        }
+    return out
+
+
+def _merge_lab_values(per_read, total: int) -> tuple[ExtractedLabValue, ...]:
+    merged = []
+    for key in sorted({k for rows in per_read for k in rows}):
+        candidates = [rows[key] for rows in per_read if key in rows]
+        values = {round(c["value"], 6) for c in candidates}
+        chosen = candidates[0]
+        merged.append(ExtractedLabValue(
+            analyte_raw=chosen["analyte_raw"],
+            value=chosen["value"],
+            unit_raw=chosen["unit_raw"],
+            ref_low=chosen["ref_low"],
+            ref_high=chosen["ref_high"],
+            reads_agreeing=len(candidates),
+            reads_total=total,
+            value_disputed=len(values) > 1,
+        ))
+    return tuple(merged)
+
+
 def _first(reads: Sequence[RawRead], field_name: str) -> str | None:
     """First non-empty value for a header field, preferring a thinking read."""
     ordered = sorted(reads, key=lambda r: not r.thinking)
@@ -493,7 +604,13 @@ def combine(reads: Sequence[RawRead]) -> ExtractionResult:
         notes.append(
             f"{len(disagreed)} of {len(merged)} lines were not seen by every read"
         )
+    lab_values = _merge_lab_values([_lab_rows_from(r.payload) for r in reads],
+                                   total)
 
+    disputed = [v.analyte_raw for v in lab_values if v.value_disputed]
+    if disputed:
+        notes.append(
+            f"reads returned different numbers for: {', '.join(disputed)}")
     date_text = _first(reads, "date_on_document")
     follow_up_text = _first(reads, "follow_up")
     follow_up_on, follow_up_after = parse_follow_up(follow_up_text)
@@ -508,6 +625,8 @@ def combine(reads: Sequence[RawRead]) -> ExtractionResult:
         prescriber=_first(reads, "prescriber"),
         facility=_first(reads, "facility"),
         lines=tuple(merged),
+        lab_values=lab_values,
+        lab_name=_first(reads, "lab_name"),
         follow_up_text=follow_up_text,
         follow_up_on=follow_up_on,
         follow_up_after_days=follow_up_after,
@@ -553,6 +672,44 @@ def extract(
     if escalate and len(reads) > 1 and reads_disagree(reads):
         reads.append(transport.read(image, mime_type, prompts[0], thinking=True))
     return combine(reads)
+
+
+def to_lab_results(
+    result: ExtractionResult,
+    *,
+    document_id: str,
+    doc_date: date,
+    lab_name: str | None = None,
+    id_prefix: str = "L",
+):
+    """Normalise extracted rows into LabResults, plus whatever was refused.
+
+    Returns (results, problems). labs.py refuses an unrecognised analyte or an
+    unverified unit rather than converting it, so a refusal is expected output
+    and not an error: it becomes something to ask about.
+    """
+    from .labs import normalise_reading
+
+    results, problems = [], []
+    for i, v in enumerate(result.lab_values, start=1):
+        out = normalise_reading(
+            id=f"{id_prefix}{i:02d}",
+            document_id=document_id,
+            doc_date=doc_date,
+            analyte_raw=v.analyte_raw,
+            value=v.value,
+            unit_raw=v.unit_raw,
+            lab_name=lab_name if lab_name is not None else result.lab_name,
+            ref_low=v.ref_low,
+            ref_high=v.ref_high,
+            confidence=v.confidence,
+        )
+        if out.ok:
+            results.append(out.result)
+        else:
+            problems.append({"printed_as": f"{v.analyte_raw} {v.value} {v.unit_raw}",
+                             "problem": out.problem})
+    return tuple(results), tuple(problems)
 
 
 def to_mentions(

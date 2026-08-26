@@ -103,26 +103,51 @@ class ClinicalClaimError(ValueError):
     """
 
 
-def clinical_claim_phrases_in(text: str) -> tuple[str, ...]:
-    """Return the SR-1 phrases present in `text`, if any."""
+def clinical_claim_phrases_in(text: str, *, quoted: tuple[str, ...] = ()) -> tuple[str, ...]:
+    """Return the SR-1 phrases present in `text`, if any.
+
+    `quoted` lists proper nouns copied verbatim out of a document — a
+    laboratory, a prescriber, a brand — which are masked before scanning.
+
+    This is not a loophole, it is the difference between a claim and a name.
+    SR-1 exists to stop Parchi asserting something clinical; it was never meant
+    to stop it saying where a test was run. A major Indian laboratory chain is
+    called SRL Diagnostics, "Diagnostics" contains "diagnos", and the invariant
+    brought down reconciliation the first time a real lab name reached a
+    finding. Most Indian labs are named that way, so this was not an edge case.
+
+    Masking is by literal substring, so it cannot be used to smuggle a claim:
+    the words around a quoted name are still scanned, and a finding that says
+    "you should stop taking it" fails whatever names it also carries.
+    """
     if not text:
         return ()
     low = text.lower()
+    for name in quoted:
+        if name and len(name) > 2:
+            low = low.replace(name.lower(), " ")
     return tuple(p for p in CLINICAL_CLAIM_PHRASES if p in low)
 
 
 def safe_quote(verbatim: str, *, limit: int = 60) -> str:
-    """Quote OCR text inside finding copy without letting it breach SR-1.
+    """Quote ARBITRARY document text — model output we could not resolve.
 
-    Finding copy interpolates only structured fields — molecule names, dates,
-    prescribers, strengths — with one exception: NEEDS_CONFIRMATION has to show
-    the caregiver what we read. That text is arbitrary model output, so a raw
-    interpolation could smuggle a forbidden phrase into a finding and trip the
-    invariant on legitimate evidence.
+    TWO KINDS OF QUOTED TEXT, TREATED DIFFERENTLY, DELIBERATELY.
 
-    Forbidden vocabulary is redacted to "[…]" here. The full verbatim reading is
-    never lost — it stays on the mention, reachable through the finding's
-    evidence ids (SR-4, NFR-5). A finding is a summary, not the evidence itself.
+    A proper noun we matched — a laboratory, a prescriber, a brand in the table
+    — is masked before the SR-1 scan and shown intact, because naming SRL
+    Diagnostics is not making a diagnosis. See `clinical_claim_phrases_in`.
+
+    This function handles the other kind: a reading that resolved to nothing.
+    That is arbitrary model output about an unreadable scrawl, and it can say
+    anything. Masking it would put advice-shaped words in front of a worried
+    caregiver on the strength of an OCR guess — quotation marks are not much
+    defence when someone is skimming a phone at a bus stop. So forbidden
+    vocabulary is redacted to "[…]" here.
+
+    Nothing is lost: the untruncated reading stays on the mention, reachable
+    through the evidence ids (SR-4, NFR-5). A finding is a summary, not the
+    evidence itself.
     """
     text = " ".join((verbatim or "").split())
     if len(text) > limit:
@@ -327,7 +352,13 @@ class MedicationState:
         if self.open_question and not self.open_question.endswith("?"):
             raise ValueError("open_question must end with '?'")
         if self.open_question:
-            hits = clinical_claim_phrases_in(self.open_question)
+            # Prescriber and brand names are copied from documents; a clinic
+            # called "… Diagnostics" must not trip SR-1.
+            hits = clinical_claim_phrases_in(
+                self.open_question,
+                quoted=self.prescribers + tuple(
+                    n for n in (self.current_brand_text,) if n),
+            )
             if hits:
                 raise ClinicalClaimError(
                     f"open_question for {self.molecule!r} contains {hits}"
@@ -356,6 +387,10 @@ class Finding:
     evidence: tuple[str, ...] = ()
     evidence_dates: tuple[date, ...] = ()
     molecules: tuple[str, ...] = ()
+    #: Proper nouns copied out of a document and interpolated into the copy —
+    #: laboratories, prescribers, brands. Masked before the SR-1 scan, because
+    #: naming a lab called SRL Diagnostics is not making a diagnosis.
+    quoted_names: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.question.endswith("?"):
@@ -364,7 +399,7 @@ class Finding:
                 f"{self.kind.value} question does not end in '?': {self.question!r}"
             )
         for label, text in (("summary", self.summary), ("question", self.question)):
-            hits = clinical_claim_phrases_in(text)
+            hits = clinical_claim_phrases_in(text, quoted=self.quoted_names)
             if hits:
                 # SR-1.
                 raise ClinicalClaimError(
