@@ -59,6 +59,14 @@ def _num(value: float) -> str:
     return f"{value:g}"
 
 
+def _join(items) -> str:
+    """"A", "A and B", "A, B and C"."""
+    items = list(items)
+    if len(items) <= 1:
+        return "".join(items)
+    return f"{', '.join(items[:-1])} and {items[-1]}"
+
+
 # --------------------------------------------------------------------------
 # The trigger
 # --------------------------------------------------------------------------
@@ -195,6 +203,50 @@ class TrendRow:
             raise ValueError(f"trend {self.analyte!r} has no points")
 
 
+@dataclass(frozen=True)
+class TestOnFile:
+    """One analyte we hold results for, so nobody re-orders it blind.
+
+    The trend section answers "where is this going". This answers the
+    prescriber's other question — "what has already been done" — which is the
+    one that stops a repeat test being ordered from the consulting room. Facts
+    only: what, when, where, how many. No interpretation (§8).
+    """
+
+    analyte: str
+    display: str
+    unit: str
+    last_measured: date
+    last_value: float
+    last_lab: str | None
+    result_count: int
+    labs: tuple[str, ...]
+    evidence: tuple[str, ...]
+
+    def days_ago(self, as_of: date) -> int:
+        return (as_of - self.last_measured).days
+
+
+def _tests_on_file(series) -> tuple[TestOnFile, ...]:
+    rows = []
+    for s in series:
+        latest = max(s.points, key=lambda p: (p.doc_date, p.id))
+        rows.append(TestOnFile(
+            analyte=s.analyte,
+            display=analyte_display(s.analyte),
+            unit=s.canonical_unit,
+            last_measured=latest.doc_date,
+            last_value=latest.canonical_value,
+            last_lab=latest.lab_name,
+            result_count=len(s.points),
+            labs=tuple(sorted({p.lab_name for p in s.points if p.lab_name})),
+            evidence=tuple(p.id for p in s.points),
+        ))
+    # Most recently measured first: that is the order in which a repeat test is
+    # least defensible.
+    return tuple(sorted(rows, key=lambda r: (-r.last_measured.toordinal(), r.analyte)))
+
+
 # --------------------------------------------------------------------------
 # The brief
 # --------------------------------------------------------------------------
@@ -213,6 +265,7 @@ class Brief:
     trends: tuple[TrendRow, ...] = ()
     questions: tuple[Finding, ...] = ()
     duplicate_tests: tuple[Finding, ...] = ()
+    tests_on_file: tuple[TestOnFile, ...] = ()
     #: Every document the brief draws on, for the provenance footer.
     source_document_ids: tuple[str, ...] = ()
 
@@ -223,7 +276,8 @@ class Brief:
     @property
     def is_empty(self) -> bool:
         return not (self.changes or self.medications or self.trends
-                    or self.questions or self.duplicate_tests)
+                    or self.questions or self.duplicate_tests
+                    or self.tests_on_file)
 
 
 def _product_rows(states) -> tuple[ProductRow, ...]:
@@ -470,6 +524,7 @@ def build_brief(
         trends=_trend_rows(now.series, lab_results),
         questions=questions,
         duplicate_tests=duplicate_tests,
+        tests_on_file=_tests_on_file(now.series),
         source_document_ids=tuple(sorted(sources)),
     )
 
@@ -613,6 +668,20 @@ def render_text(brief: Brief, *, width: int = 72) -> str:
         para(f"→ {f.question}", indent="      ", hang="        ")
         para(f"source: {', '.join(f.evidence)}", indent="      ", hang="        ")
 
+    out.append(f"\n6. TESTS ALREADY ON FILE\n{rule}")
+    if not brief.tests_on_file:
+        out.append("  No lab results on file.")
+    for t in brief.tests_on_file:
+        ago = t.days_ago(brief.generated_on)
+        # Prose rather than a table: unlike a trend series, nothing here is
+        # compared down a column, so wrapping costs nothing and NFR-6 is served.
+        para(f"{t.display} — last measured {_num(t.last_value)} {t.unit} on "
+             f"{_d(t.last_measured)}, {ago} days ago. "
+             f"{t.result_count} result(s) on file from "
+             f"{_join(t.labs) or 'a lab that is not named'}.",
+             indent="  ", hang="      ")
+        para(f"source: {', '.join(t.evidence)}", indent="      ", hang="        ")
+
     out.append(f"\n{rule}")
     para(f"Built from {len(brief.source_document_ids)} documents: "
          f"{', '.join(brief.source_document_ids)}", indent="")
@@ -650,3 +719,97 @@ def _main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(_main())
+
+
+# --------------------------------------------------------------------------
+# Serialisation for the prescriber view
+# --------------------------------------------------------------------------
+
+def as_dict(brief: Brief) -> dict:
+    """The brief as structured data, for a view that discloses progressively.
+
+    render_text() gives one block, which is right for a terminal and wrong for a
+    prescriber with seven minutes. This keeps the sections separate so the page
+    can show the summary and hold the detail behind a tap.
+    """
+    return {
+        "appointment_on": brief.appointment_on.isoformat(),
+        "generated_on": brief.generated_on.isoformat(),
+        "days_until": brief.days_until,
+        "since": brief.since.isoformat() if brief.since else None,
+        "trigger_document_id": brief.trigger_document_id,
+        "prescriber": brief.prescriber,
+        "counts": {
+            "changes": len(brief.changes),
+            "medications": len(brief.medications),
+            "taking_now": sum(1 for r in brief.medications
+                              if r.status in ACTIVE_LIKE),
+            "questions": len(brief.questions),
+            "ask_soon": sum(1 for f in brief.questions
+                            if f.attention.value == "ASK_SOON"),
+            "duplicate_tests": len(brief.duplicate_tests),
+            "tests_on_file": len(brief.tests_on_file),
+            "documents": len(brief.source_document_ids),
+        },
+        "changes": [
+            {"kind": c.kind.value, "subject": c.subject, "detail": c.detail,
+             "evidence": list(c.evidence)}
+            for c in brief.changes
+        ],
+        "medications": [
+            {
+                "brand_text": r.brand_text,
+                "status": r.status.value,
+                "taking_now": r.status in ACTIVE_LIKE,
+                "molecules": [
+                    {"molecule": m, "strength_mg": s}
+                    for m, s in zip(r.molecules, r.strengths_mg)
+                ],
+                "also_contains": [
+                    {"molecule": m, "counted_under": w} for m, w in r.also_contains
+                ],
+                "dose_pattern": r.dose_pattern,
+                "prescribers": list(r.prescribers),
+                "last_written": r.last_written.isoformat(),
+                "evidence": list(r.evidence),
+                "open_questions": list(r.open_questions),
+            }
+            for r in brief.medications
+        ],
+        "trends": [
+            {
+                "analyte": t.display, "unit": t.unit, "direction": t.direction,
+                "points": [
+                    {"on": p.on.isoformat(), "value": p.value, "lab": p.lab_name,
+                     "printed_as": (f"{_num(p.raw_value)} {p.raw_unit}"
+                                    if p.raw_unit and p.raw_unit != t.unit else None),
+                     "reference": ([p.ref_low, p.ref_high]
+                                   if p.ref_low is not None and p.ref_high is not None
+                                   else None),
+                     "result_id": p.result_id}
+                    for p in t.points
+                ],
+            }
+            for t in brief.trends
+        ],
+        "questions": [
+            {"kind": f.kind.value, "attention": f.attention.value,
+             "observed": f.summary, "ask": f.question,
+             "molecules": list(f.molecules), "evidence": list(f.evidence)}
+            for f in brief.questions
+        ],
+        "duplicate_tests": [
+            {"observed": f.summary, "ask": f.question, "evidence": list(f.evidence)}
+            for f in brief.duplicate_tests
+        ],
+        "tests_on_file": [
+            {"analyte": t.display, "unit": t.unit,
+             "last_measured": t.last_measured.isoformat(),
+             "days_ago": t.days_ago(brief.generated_on),
+             "last_value": t.last_value, "last_lab": t.last_lab,
+             "result_count": t.result_count, "labs": list(t.labs),
+             "evidence": list(t.evidence)}
+            for t in brief.tests_on_file
+        ],
+        "source_document_ids": list(brief.source_document_ids),
+    }

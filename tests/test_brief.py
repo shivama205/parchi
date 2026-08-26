@@ -417,3 +417,99 @@ def test_prose_wraps_but_the_trend_table_keeps_its_columns(brief):
     assert any(len(l) > 48 for l in lines if l.strip().endswith("]"))
     prose = [l for l in lines if l.strip().startswith("[ASK_")]
     assert prose and all(len(l) <= 58 for l in prose)
+
+
+# ==========================================================================
+# Tests already on file — the prescriber's other question
+# ==========================================================================
+
+def test_tests_on_file_lists_what_has_already_been_done(brief):
+    """The trends section answers "where is this going". This answers "what has
+    already been done", which is the one that stops a repeat test."""
+    by_analyte = {t.analyte: t for t in brief.tests_on_file}
+    assert set(by_analyte) == {"hba1c", "creatinine"}
+
+    creat = by_analyte["creatinine"]
+    assert creat.display == "creatinine"
+    assert creat.result_count == 2
+    assert creat.last_measured == date(2026, 7, 2)
+    assert creat.last_value == 1.2
+    assert creat.last_lab == "SRL"
+    assert set(creat.labs) == {"SRL", "Dr Lal PathLabs"}
+    assert creat.days_ago(AS_OF) == 55
+
+
+def test_tests_on_file_includes_analytes_too_short_for_a_trend(brief):
+    """Creatinine has two points, so it has no trend — but it has still been
+    measured, and a prescriber ordering it again should know that."""
+    assert "creatinine" not in {t.analyte for t in brief.trends}
+    assert "creatinine" in {t.analyte for t in brief.tests_on_file}
+
+
+def test_tests_on_file_is_ordered_most_recent_first(brief):
+    dates = [t.last_measured for t in brief.tests_on_file]
+    assert dates == sorted(dates, reverse=True)
+
+
+def test_tests_on_file_cites_every_result(brief):
+    for t in brief.tests_on_file:
+        assert len(t.evidence) == t.result_count
+
+
+def test_tests_on_file_appears_in_the_rendered_brief(brief):
+    text = render_text(brief)
+    assert "6. TESTS ALREADY ON FILE" in text
+    assert "creatinine — last measured 1.2 mg/dL" in text
+
+
+def test_a_brief_with_no_labs_has_no_tests_on_file():
+    b = build_brief(MENTIONS, appointment_on=date(2026, 8, 27), as_of=AS_OF)
+    assert b.tests_on_file == ()
+    assert "No lab results on file" in render_text(b)
+
+
+# ==========================================================================
+# Serialisation for the prescriber view
+# ==========================================================================
+
+def test_as_dict_keeps_every_section_separate(brief):
+    from parchi.brief import as_dict
+
+    d = as_dict(brief)
+    for key in ("changes", "medications", "trends", "questions",
+                "duplicate_tests", "tests_on_file"):
+        assert key in d, key
+    assert d["counts"]["taking_now"] == 8
+    assert d["counts"]["ask_soon"] == 3
+    assert d["trigger_document_id"] == "RX3"
+
+
+def test_as_dict_carries_provenance_everywhere(brief):
+    """NFR-5 survives serialisation, not just rendering."""
+    from parchi.brief import as_dict
+
+    d = as_dict(brief)
+    for row in d["changes"] + d["medications"] + d["questions"] + d["tests_on_file"]:
+        assert row["evidence"], row
+    for t in d["trends"]:
+        for p in t["points"]:
+            assert p["result_id"]
+
+
+def test_as_dict_preserves_the_combination_note(brief):
+    from parchi.brief import as_dict
+
+    d = as_dict(brief)
+    ecosprin = next(m for m in d["medications"]
+                    if m["brand_text"] == "Ecosprin AV 75")
+    assert ecosprin["also_contains"] == [
+        {"molecule": "atorvastatin", "counted_under": "Storvas 10"}]
+
+
+def test_as_dict_shows_the_printed_unit_where_it_differed(brief):
+    from parchi.brief import as_dict
+
+    d = as_dict(brief)
+    hba1c = next(t for t in d["trends"] if t["analyte"] == "HbA1c")
+    printed = [p["printed_as"] for p in hba1c["points"] if p["printed_as"]]
+    assert printed == ["64 mmol/mol"]

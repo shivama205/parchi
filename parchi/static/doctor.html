@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Case history — Parchi</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:wght@400;500&family=Public+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root{--ink:#16213A;--soft:#3D4A63;--ground:#FBFAF7;--panel:#F4F2EC;--rule:#D8D4CB;
+        --label:#6E6A61;--stamp:#A63A2B;--stamp-bg:#F6E9E5;--ok:#2F6B52;--ok-bg:#E6EFE9;
+        --warn:#8A6D1F;--warn-bg:#F5EEDA;
+        --sans:"Public Sans",system-ui,sans-serif;--serif:"Newsreader",Georgia,serif;
+        --mono:"IBM Plex Mono",Menlo,monospace;}
+  @media (prefers-color-scheme:dark){:root{--ink:#E8E4DA;--soft:#A8A69E;--ground:#14161A;
+        --panel:#1C1F25;--rule:#333841;--label:#8E8B83;--stamp:#E08A76;--stamp-bg:#2E1F1C;
+        --ok:#79B396;--ok-bg:#18261F;--warn:#C9A652;--warn-bg:#262016;}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);
+       font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:46rem;margin:0 auto;padding:1.25rem 1rem 3rem}
+  .tag{font-family:var(--mono);font-size:.63rem;letter-spacing:.13em;
+       text-transform:uppercase;color:var(--label);margin:0 0 .5rem}
+  h1{font-family:var(--serif);font-weight:500;font-size:1.75rem;margin:0 0 .2rem;
+     letter-spacing:-.01em}
+  .sub{color:var(--soft);font-size:.9rem;margin:0 0 .2rem}
+  .disc{font-size:.8rem;color:var(--label);margin:.5rem 0 0;padding-top:.5rem;
+        border-top:1px solid var(--rule)}
+
+  /* the one screen: counts at a glance */
+  .band{display:grid;grid-template-columns:repeat(auto-fit,minmax(6rem,1fr));
+        gap:1px;background:var(--rule);border:1px solid var(--rule);margin:1.1rem 0 0}
+  .band div{background:var(--ground);padding:.6rem .7rem}
+  .band dt{font-family:var(--mono);font-size:.58rem;letter-spacing:.1em;
+           text-transform:uppercase;color:var(--label);margin:0 0 .2rem}
+  .band dd{margin:0;font-family:var(--serif);font-size:1.4rem;line-height:1;
+           font-variant-numeric:tabular-nums}
+  .band dd.hot{color:var(--stamp)}
+
+  h2{font-family:var(--mono);font-size:.64rem;letter-spacing:.13em;
+     text-transform:uppercase;color:var(--label);font-weight:400;margin:1.9rem 0 .5rem}
+  .card{border:1px solid var(--rule)}
+  .item{padding:.65rem .8rem;border-bottom:1px solid var(--rule)}
+  .item:last-child{border-bottom:none}
+  .obs{font-size:.9rem}
+  .ask{font-family:var(--serif);font-size:1.02rem;margin-top:.25rem}
+  .src{font-family:var(--mono);font-size:.63rem;color:var(--label);margin-top:.3rem}
+  .pill{font-family:var(--mono);font-size:.58rem;letter-spacing:.08em;
+        text-transform:uppercase;padding:.1rem .35rem;border-left:3px solid currentColor;
+        white-space:nowrap}
+  .pill.soon{color:var(--stamp);background:var(--stamp-bg)}
+  .pill.next{color:var(--warn);background:var(--warn-bg)}
+  .pill.fyi{color:var(--soft);background:var(--panel)}
+  .pill.a{color:var(--ok);background:var(--ok-bg)}
+  .pill.u{color:var(--warn);background:var(--warn-bg)}
+  .pill.s{color:var(--stamp);background:var(--stamp-bg)}
+  .kind{font-family:var(--mono);font-size:.58rem;letter-spacing:.08em;
+        text-transform:uppercase;color:var(--label);margin-right:.4rem}
+  .top{display:flex;justify-content:space-between;gap:.6rem;align-items:baseline;
+       flex-wrap:wrap}
+
+  details{border:1px solid var(--rule);margin:0 0 .5rem}
+  details+details{margin-top:-.5rem;border-top:none}
+  summary{padding:.65rem .8rem;cursor:pointer;font-weight:500;font-size:.92rem;
+          display:flex;justify-content:space-between;gap:.6rem;align-items:baseline}
+  summary::-webkit-details-marker{display:none}
+  summary::after{content:"＋";font-family:var(--mono);color:var(--label);font-size:.9rem}
+  details[open] summary::after{content:"－"}
+  summary:focus-visible{outline:2px solid var(--ink);outline-offset:-2px}
+  .body{border-top:1px solid var(--rule)}
+  .count{font-family:var(--mono);font-size:.63rem;color:var(--label);font-weight:400}
+
+  .scroll{overflow-x:auto}
+  table{border-collapse:collapse;width:100%;font-size:.83rem;min-width:26rem}
+  th,td{padding:.4rem .8rem;text-align:left;border-bottom:1px solid var(--rule)}
+  th{font-family:var(--mono);font-size:.58rem;letter-spacing:.08em;
+     text-transform:uppercase;color:var(--label);font-weight:400}
+  td.n{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+  tbody tr:last-child td{border-bottom:none}
+
+  footer{margin-top:2rem;padding-top:.8rem;border-top:1px solid var(--rule);
+         font-size:.78rem;color:var(--label);font-family:var(--mono)}
+  .err{border-left:3px solid var(--stamp);background:var(--stamp-bg);padding:.8rem}
+  @media print{
+    details{border:none} details .body{display:block!important}
+    summary::after{content:""} .band{border:1px solid #999}
+    body{background:#fff;color:#000}
+  }
+</style>
+</head>
+<body>
+<div class="wrap" id="root">
+  <p class="tag">Loading case history…</p>
+</div>
+
+<script>
+const PATIENT = location.pathname.split("/").filter(Boolean)[1] || "p-fixture-1";
+const ON = new URLSearchParams(location.search).get("on");
+
+function esc(s){const d=document.createElement("div");d.textContent=s??"";return d.innerHTML;}
+function pill(a){return a==="ASK_SOON"?"soon":a==="ASK_NEXT_VISIT"?"next":"fyi";}
+function fmtDate(iso){
+  const d=new Date(iso+"T00:00:00");
+  return d.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
+}
+
+function block(title, count, inner, open){
+  return `<details ${open?"open":""}><summary>${esc(title)}
+    <span class="count">${esc(count)}</span></summary>
+    <div class="body">${inner}</div></details>`;
+}
+
+function render(d){
+  const c=d.counts;
+  const changes = d.changes.length ? d.changes.map(x=>
+    `<div class="item"><span class="kind">${esc(x.kind.replace(/_/g," "))}</span>
+     <span class="obs">${esc(x.detail)}</span>
+     <div class="src">source ${esc(x.evidence.join(", "))}</div></div>`).join("")
+    : '<div class="item">Nothing changed on paper.</div>';
+
+  const questions = d.questions.length ? d.questions.map(q=>
+    `<div class="item"><div class="top"><span class="kind">${esc(q.kind.replace(/_/g," "))}</span>
+     <span class="pill ${pill(q.attention)}">${esc(q.attention.replace(/_/g," "))}</span></div>
+     <div class="obs">${esc(q.observed)}</div>
+     <div class="ask">${esc(q.ask)}</div>
+     <div class="src">source ${esc(q.evidence.join(", "))}</div></div>`).join("")
+    : '<div class="item">Nothing outstanding.</div>';
+
+  const meds = d.medications.map(m=>{
+    const cls = m.taking_now?"a":(m.status==="UNCERTAIN"?"u":"s");
+    const mol = m.molecules.map(x=>x.strength_mg!=null
+      ? `${esc(x.molecule)} ${x.strength_mg} mg`
+      : `${esc(x.molecule)} <span class="src">(strength not attributable)</span>`).join(", ");
+    const also = m.also_contains.map(a=>
+      `<div class="src">also contains ${esc(a.molecule)} — counted under ${esc(a.counted_under)}</div>`).join("");
+    const qs = m.open_questions.map(q=>`<div class="ask">${esc(q)}</div>`).join("");
+    return `<div class="item"><div class="top"><b>${esc(m.brand_text)}</b>
+      <span class="pill ${cls}">${esc(m.status.replace(/_/g," "))}</span></div>
+      <div class="obs">${mol}</div>${also}
+      <div class="src">${esc(m.prescribers.join(", ")||"unattributed")}${m.dose_pattern?" · "+esc(m.dose_pattern):""} · last written ${esc(fmtDate(m.last_written))} · ${esc(m.evidence.join(", "))}</div>
+      ${qs}</div>`;
+  }).join("");
+
+  const trends = d.trends.length ? d.trends.map(t=>
+    `<div class="item"><b>${esc(t.analyte)}</b> <span class="src">${esc(t.unit)} — ${esc(t.direction||"no consistent direction")}</span></div>
+     <div class="scroll"><table><thead><tr><th>Date</th><th>Value</th><th>Lab</th><th>Range on that report</th><th>Ref</th></tr></thead><tbody>
+     ${t.points.map(p=>`<tr><td class="n">${esc(fmtDate(p.on))}</td>
+       <td class="n">${esc(p.value)}${p.printed_as?` <span class="src">(printed ${esc(p.printed_as)})</span>`:""}</td>
+       <td>${esc(p.lab||"not named")}</td>
+       <td class="n">${p.reference?esc(p.reference[0]+"–"+p.reference[1]):"none printed"}</td>
+       <td class="n">${esc(p.result_id)}</td></tr>`).join("")}
+     </tbody></table></div>`).join("")
+    : '<div class="item">No analyte has three or more measurements.</div>';
+
+  const tests = d.tests_on_file.length ? `<div class="scroll"><table>
+    <thead><tr><th>Test</th><th>Last measured</th><th>Value</th><th>On file</th><th>Labs</th></tr></thead><tbody>
+    ${d.tests_on_file.map(t=>`<tr><td>${esc(t.analyte)}</td>
+      <td class="n">${esc(fmtDate(t.last_measured))} <span class="src">(${t.days_ago}d ago)</span></td>
+      <td class="n">${esc(t.last_value)} ${esc(t.unit)}</td>
+      <td class="n">${t.result_count}</td>
+      <td>${esc(t.labs.join(", ")||"not named")}</td></tr>`).join("")}
+    </tbody></table></div>` + (d.duplicate_tests.length ? d.duplicate_tests.map(x=>
+      `<div class="item"><div class="obs">${esc(x.observed)}</div>
+       <div class="ask">${esc(x.ask)}</div>
+       <div class="src">source ${esc(x.evidence.join(", "))}</div></div>`).join("") : "")
+    : '<div class="item">No lab results on file.</div>';
+
+  document.getElementById("root").innerHTML = `
+    <p class="tag">Case history · constructed fixture · no real patient data</p>
+    <h1>Follow-up ${esc(fmtDate(d.appointment_on))}</h1>
+    <p class="sub">${d.prescriber?esc(d.prescriber)+" · ":""}follow-up written on the prescription of
+      ${d.since?esc(fmtDate(d.since)):"—"}${d.trigger_document_id?" ["+esc(d.trigger_document_id)+"]":""}</p>
+
+    <dl class="band">
+      <div><dt>Changed</dt><dd${c.changes?' class="hot"':""}>${c.changes}</dd></div>
+      <div><dt>Taking now</dt><dd>${c.taking_now}</dd></div>
+      <div><dt>Ask soon</dt><dd${c.ask_soon?' class="hot"':""}>${c.ask_soon}</dd></div>
+      <div><dt>Questions</dt><dd>${c.questions}</dd></div>
+      <div><dt>Tests on file</dt><dd>${c.tests_on_file}</dd></div>
+      <div><dt>Documents</dt><dd>${c.documents}</dd></div>
+    </dl>
+
+    <h2>Since your last visit</h2>
+    <div class="card">${changes}</div>
+
+    <h2>Questions the family has</h2>
+    <div class="card">${questions}</div>
+
+    <h2>Detail</h2>
+    ${block("Current medication list", c.medications+" products", meds, false)}
+    ${block("Lab trends", d.trends.length+" with 3+ points", trends, false)}
+    ${block("Tests already on file", c.tests_on_file+" analytes", tests, false)}
+
+    <p class="disc">Derived from the family's paperwork. Observations and questions
+      only — nothing here is a diagnosis, a recommendation, or a statement about
+      drug interactions. Every line names the document it came from. Readings the
+      family has not confirmed are marked and excluded from the medication list.</p>
+    <footer>${esc(d.source_document_ids.join(" · "))}</footer>`;
+}
+
+fetch(`/api/brief/${encodeURIComponent(PATIENT)}` + (ON?`?on=${encodeURIComponent(ON)}`:""))
+  .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e.detail || r.status)))
+  .then(render)
+  .catch(err => {
+    document.getElementById("root").innerHTML =
+      `<p class="tag">Case history</p><div class="err">Could not build a history: ${esc(String(err))}
+       <br><br>If there is no follow-up on file, add <code>?on=YYYY-MM-DD</code>.</div>`;
+  });
+</script>
+</body>
+</html>

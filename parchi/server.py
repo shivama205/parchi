@@ -198,6 +198,48 @@ def create_app():
                 deps, body.patient_id or "p-fixture-1")
         return payload
 
+    @app.get("/api/brief/{patient_id}")
+    def brief_json(patient_id: str, on: str | None = None):
+        """The brief as structured data, for the prescriber view.
+
+        Without `on`, uses the next follow-up the sweep would find. The
+        prescriber never asks for this; the caregiver hands over the link.
+        """
+        from .brief import as_dict, brief_for, build_brief, due_appointments
+        from .store import apply_corrections
+
+        mentions = apply_corrections(deps.store, patient_id,
+                                     deps.store.list_mentions(patient_id))
+        labs = deps.store.list_lab_results(patient_id)
+        docs = deps.store.list_documents(patient_id)
+
+        if on:
+            try:
+                when = date.fromisoformat(on)
+            except ValueError:
+                raise HTTPException(400, f"could not read {on!r} as YYYY-MM-DD")
+            trigger = next((d for d in docs if d.follow_up_date == when), None)
+            b = build_brief(
+                mentions, appointment_on=when, as_of=today(), lab_results=labs,
+                since=trigger.doc_date if trigger else None,
+                trigger_document_id=trigger.id if trigger else None,
+                prescriber=trigger.prescriber if trigger else None)
+        else:
+            due = due_appointments(docs, as_of=today())
+            if not due:
+                raise HTTPException(
+                    404, "no follow-up on file; pass ?on=YYYY-MM-DD")
+            b = brief_for(due[0], mentions, as_of=today(), lab_results=labs)
+        return as_dict(b)
+
+    @app.get("/d/{patient_id}")
+    def doctor_view(patient_id: str):
+        """The prescriber's one-screen history. BO-5's distribution channel."""
+        page = STATIC / "doctor.html"
+        if page.exists():
+            return FileResponse(page)
+        return JSONResponse({"see": f"/api/brief/{patient_id}"})
+
     @app.post("/api/sweep")
     def sweep(request: Request):
         """The J3 trigger. Called by Cloud Scheduler, not by a person.

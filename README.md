@@ -33,7 +33,7 @@ python3 -m venv .venv
 ./.venv/bin/python -m pip install -e '.[dev]'
 ```
 
-Run the test suite (291 tests):
+Run the test suite (315 tests):
 
 ```bash
 ./.venv/bin/python -m pytest -q
@@ -98,6 +98,10 @@ measure of how demo-grade the table is.
 | Per-prescriber correction memory (§4 J2.3) | — | Not started |
 | Unprompted brief + sweep (§4 J3) | `parchi/brief.py` | Done |
 | Brief assembly (§4 J3) | `parchi/brief.py` | Done — deterministic |
+| Prescriber view (BO-5) | `parchi/static/doctor.html` | Done |
+| ADK agent fleet (§10) | `parchi/agent.py` | Done — 3 agents + coordinator |
+| Firestore persistence | `parchi/store.py` | Done — asia-south1 |
+| HTTP service + chat UI | `parchi/server.py` | Done — live on Cloud Run |
 | ADK agents + Cloud Run (§10) | — | Not started |
 
 ---
@@ -151,6 +155,36 @@ misses produces no line at all, so it cannot be flagged — it is simply absent,
 and at 82.9% recall roughly one drug in six is. The confirmation loop surfaces
 what was read badly; it cannot surface what was never seen. Nothing in this
 codebase fixes that, and a caregiver should not be told the list is complete.
+
+## Two audiences, one derivation
+
+**The family** gets the chat interface at `/` — the current list, the open
+questions, and an agent that answers from the paperwork.
+
+**The prescriber** gets `/d/{patient_id}` — a case history the caregiver hands
+over. Seven minutes is the design constraint, so it opens on six counts and two
+visible sections (what changed since your last visit, and what the family is
+asking), with the medication list, lab trends and tests-on-file held behind a
+tap. Native `<details>`, so it works with no JavaScript and reads on a printed
+page.
+
+Both are the same `reconcile()` call. Nothing is computed twice and nothing is
+stored, so the two views cannot disagree.
+
+### What was deliberately not built
+
+**Adherence.** We only ever see paper. A prescription records what was
+*prescribed*, never what was *taken*, and a gap between scripts could be a
+switched pharmacy, a sample pack, a hospital admission, or a strip bought
+without one. Inferring skipped doses from documents would be the
+confidently-wrong claim this codebase is arranged to prevent.
+
+What exists instead is the honest version: `STALE_AFTER_DAYS` surfaces
+*"metformin was last written 200 days ago with no end date — is it still being
+taken?"* — an observation about paper, paired with a question. A
+caregiver-reported log ("he stopped the Zoryl last week", cited to the person who
+said it) is the right next step, and it needs a conversation layer rather than a
+new inference.
 
 ## The unprompted brief
 

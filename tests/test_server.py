@@ -126,3 +126,46 @@ def test_safe_reply_withholds_clinical_prose():
     withheld, hits = safe_reply("You should stop taking it immediately.")
     assert withheld == WITHHELD
     assert set(hits) >= {"you should", "stop taking", "immediately"}
+
+
+# ==========================================================================
+# The prescriber view — BO-5's distribution channel
+# ==========================================================================
+
+def test_the_structured_brief_is_served(client):
+    client.post("/api/seed")
+    r = client.get("/api/brief/p-fixture-1")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["appointment_on"] == "2026-08-27"
+    assert d["trigger_document_id"] == "RX3"
+    assert d["counts"]["tests_on_file"] == 2
+
+
+def test_the_structured_brief_accepts_an_explicit_date(client):
+    client.post("/api/seed")
+    r = client.get("/api/brief/p-fixture-1", params={"on": "2026-09-30"})
+    assert r.status_code == 200
+    assert r.json()["appointment_on"] == "2026-09-30"
+
+
+def test_a_bad_date_is_rejected_rather_than_guessed(client):
+    r = client.get("/api/brief/p-fixture-1", params={"on": "next tuesday"})
+    assert r.status_code == 400
+
+
+def test_no_follow_up_on_file_is_a_404_not_an_invented_appointment(client):
+    client.post("/api/seed")
+    client.delete("/api/patient/p-fixture-1")
+    r = client.get("/api/brief/p-fixture-1")
+    assert r.status_code == 404
+    client.post("/api/seed")
+
+
+def test_the_prescriber_page_is_served(client):
+    r = client.get("/d/p-fixture-1")
+    assert r.status_code == 200
+    assert "Case history" in r.text
+    # The boundary has to be visible to the prescriber, not only to the family.
+    assert "nothing here is a diagnosis" in r.text.lower()
+    assert "no real patient data" in r.text.lower()
