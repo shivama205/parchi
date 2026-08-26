@@ -33,7 +33,7 @@ python3 -m venv .venv
 ./.venv/bin/python -m pip install -e '.[dev]'
 ```
 
-Run the test suite:
+Run the test suite (137 tests):
 
 ```bash
 ./.venv/bin/python -m pytest -q
@@ -56,7 +56,7 @@ See the reconciliation engine work on the constructed scenario — 9 documents,
 | Brand normalisation (§7) | `parchi/drugs.py` | Done — demo-grade table |
 | Reconciliation rules (§6) | `parchi/reconcile.py` | Done |
 | Safety invariants SR-1…SR-9 (§11) | enforced in models + `tests/` | Done |
-| Lab unit conversion (§8) | `parchi/labs.py` | Not started |
+| Lab unit conversion (§8) | `parchi/labs.py` | Done — every factor cited |
 | Extraction (§9) | `parchi/extract.py` | Not started |
 | Per-prescriber correction memory (§4 J2.3) | — | Not started |
 | Brief assembly (§4 J3) | — | Not started |
@@ -119,6 +119,10 @@ implements SR-1; if it fails, the product has drifted into practising medicine.
 | SR-8 | No drug interaction asserted in code or prompts | test scans the source |
 | SR-9 | No real patient data; fixtures declared constructed | test scans this README |
 
+Lab conversions carry a further structural check: `test_every_conversion_cites_a_source`
+fails if any factor is added without provenance, which is §8's citation
+requirement expressed as a test rather than a good intention.
+
 Three of these are structural rather than advisory — `Finding` cannot be
 constructed with a clinical claim or without a question mark, and
 `MedicationMention` refuses to hold a partially attributed strength. Failing
@@ -148,6 +152,27 @@ demotion is one step (HIGH → MEDIUM → LOW), which is what "forces confidence
 down" says.
 
 ---
+
+## Lab conversions and their sources
+
+Factors are verified, not remembered. Primary sources are cited at each entry in
+`parchi/labs.py`:
+
+- **[UKKA]** UK Kidney Association, [Appendix I — Laboratory Conversion Factors](https://www.ukkidney.org/sites/renal.org/files/Appen-I.pdf)
+  — cholesterol, creatinine, glucose, and the g/L → g/dL basis.
+- **[NGSP]** NGSP, [IFCC Standardization](https://ngsp.org/ifcc.asp) — the HbA1c
+  master equation, `NGSP% = 0.09148 × IFCC + 2.152`. This is the one conversion
+  that is affine rather than a scale factor; multiplying by a factor would be
+  badly wrong.
+- **[MOLAR]** Derived from molar mass, stated so the arithmetic can be checked
+  rather than trusted — used where [UKKA] rounds (creatinine, glucose,
+  cholesterol) and for the two analytes it does not list (triglycerides at
+  885.7 g/mol, calcidiol at 400.65 g/mol).
+
+An unrecognised analyte label or an unverified unit is **refused**, not
+converted — the same posture `drugs.py` takes toward an unlisted brand. The raw
+value and unit are never discarded, and a printed reference range is converted
+with the same function as its own value and never reused across reports.
 
 ## The brand table is demo-grade
 

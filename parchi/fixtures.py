@@ -21,8 +21,9 @@ from __future__ import annotations
 
 from datetime import date
 
-from parchi.drugs import mention_from_reading
-from parchi.models import Confidence, Document, DocumentKind, LabResult
+from .drugs import mention_from_reading
+from .labs import normalise_reading
+from .models import Confidence, Document, DocumentKind
 
 AS_OF = date(2026, 8, 26)
 
@@ -113,32 +114,34 @@ MENTIONS = (
 )
 
 
-LAB_RESULTS = (
-    # HbA1c rising across four measurements at two labs — AC-8 shape.
-    LabResult(id="L1", document_id="LR1", doc_date=date(2025, 7, 8),
-              analyte_raw="HbA1c", analyte="hba1c", value=7.1, unit_raw="%",
-              canonical_value=7.1, canonical_unit="%", lab_name="SRL",
-              ref_low=4.0, ref_high=5.7),
-    LabResult(id="L2", document_id="LR2", doc_date=date(2026, 1, 12),
-              analyte_raw="HBA1C (Glycosylated Hb)", analyte="hba1c", value=7.6,
-              unit_raw="%", canonical_value=7.6, canonical_unit="%",
-              lab_name="Dr Lal PathLabs", ref_low=4.0, ref_high=5.6),
-    LabResult(id="L3", document_id="LR3", doc_date=date(2026, 3, 8),
-              analyte_raw="HbA1c", analyte="hba1c", value=8.0, unit_raw="%",
-              canonical_value=8.0, canonical_unit="%", lab_name="SRL",
-              ref_low=4.0, ref_high=5.7),
-    LabResult(id="L4", document_id="LR4", doc_date=date(2026, 6, 18),
-              analyte_raw="HbA1c", analyte="hba1c", value=8.4, unit_raw="%",
-              canonical_value=8.4, canonical_unit="%",
-              lab_name="Dr Lal PathLabs", ref_low=4.0, ref_high=5.6),
+def _lab(lid, doc_id, day, label, value, unit, lab, low, high):
+    """Build a LabResult through the §8 normaliser, so raw units are exercised."""
+    out = normalise_reading(
+        id=lid, document_id=doc_id, doc_date=day, analyte_raw=label,
+        value=value, unit_raw=unit, lab_name=lab, ref_low=low, ref_high=high,
+    )
+    assert out.ok, out.problem
+    return out.result
 
-    # Creatinine measured twice inside the window at different labs.
-    LabResult(id="L5", document_id="LR4", doc_date=date(2026, 6, 18),
-              analyte_raw="Creatinine, Serum", analyte="creatinine", value=1.1,
-              unit_raw="mg/dL", canonical_value=1.1, canonical_unit="mg/dL",
-              lab_name="Dr Lal PathLabs", ref_low=0.7, ref_high=1.3),
-    LabResult(id="L6", document_id="LR5", doc_date=date(2026, 7, 2),
-              analyte_raw="S. Creatinine", analyte="creatinine", value=1.2,
-              unit_raw="mg/dL", canonical_value=1.2, canonical_unit="mg/dL",
-              lab_name="SRL", ref_low=0.6, ref_high=1.2),
+
+# HbA1c rising across four measurements at three labs — and Metropolis reports
+# IFCC mmol/mol while the others report NGSP %. AC-8 needs exactly this: two
+# units landing on one normalised axis, each point keeping its own printed
+# range. 64 mmol/mol normalises to 8.01%.
+LAB_RESULTS = (
+    _lab("L1", "LR1", date(2025, 7, 8), "HbA1c", 7.1, "%",
+         "SRL", 4.0, 5.7),
+    _lab("L2", "LR2", date(2026, 1, 12), "HBA1C (Glycosylated Hb)", 7.6, "%",
+         "Dr Lal PathLabs", 4.0, 5.6),
+    _lab("L3", "LR3", date(2026, 3, 8), "Glycosylated Haemoglobin", 64, "mmol/mol",
+         "Metropolis", 20, 42),
+    _lab("L4", "LR4", date(2026, 6, 18), "HbA1c", 8.4, "%",
+         "Dr Lal PathLabs", 4.0, 5.6),
+
+    # Creatinine measured twice inside the window at different labs, one
+    # reporting SI units. 97 µmol/L normalises to 1.1 mg/dL.
+    _lab("L5", "LR4", date(2026, 6, 18), "Creatinine, Serum", 97, "µmol/L",
+         "Dr Lal PathLabs", 62, 115),
+    _lab("L6", "LR5", date(2026, 7, 2), "S. Creatinine", 1.2, "mg/dL",
+         "SRL", 0.6, 1.2),
 )

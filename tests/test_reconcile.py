@@ -484,7 +484,9 @@ def test_reference_ranges_are_kept_per_report():
     """§8 — never apply one lab's range to another lab's value."""
     hba1c = next(s for s in reconcile(
         [], as_of=AS_OF, lab_results=LAB_RESULTS).series if s.analyte == "hba1c")
-    assert {p.ref_high for p in hba1c.points} == {5.6, 5.7}
+    # Three distinct printed ranges, including Metropolis's 20-42 mmol/mol
+    # converted through the same equation as its value.
+    assert {p.ref_high for p in hba1c.points} == {5.6, 5.7, 5.99}
 
 
 # ==========================================================================
