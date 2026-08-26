@@ -33,7 +33,7 @@ python3 -m venv .venv
 ./.venv/bin/python -m pip install -e '.[dev]'
 ```
 
-Run the test suite (172 tests):
+Run the test suite (231 tests):
 
 ```bash
 ./.venv/bin/python -m pytest -q
@@ -94,12 +94,49 @@ measure of how demo-grade the table is.
 | Reconciliation rules (§6) | `parchi/reconcile.py` | Done |
 | Safety invariants SR-1…SR-9 (§11) | enforced in models + `tests/` | Done |
 | Lab unit conversion (§8) | `parchi/labs.py` | Done — every factor cited |
-| Extraction (§9) | `parchi/extract.py` | Not started |
+| Extraction (§9) | `parchi/extract.py` | Done — agreement-based confidence |
 | Per-prescriber correction memory (§4 J2.3) | — | Not started |
 | Brief assembly (§4 J3) | — | Not started |
 | ADK agents + Cloud Run (§10) | — | Not started |
 
 ---
+
+## Extraction: confidence is measured, not asked for
+
+PRD §9.3 asks the model for a per-field confidence, and §5.2/SR-3 gate on it.
+Measured against 85 handwritten Indian prescriptions, that signal does not
+exist: `gemini-3.5-flash` returned HIGH on **342 of 382** medication lines,
+including 88 that matched no annotated drug, and returned LOW **eleven** times
+— none of them correct readings. It essentially never expresses doubt.
+
+So `extract.py` does not ask. Confidence is **derived from agreement between
+independent reads**: unanimous is HIGH, a majority is MEDIUM, a single
+dissenting read is LOW and therefore gated by SR-3 until a human confirms it.
+Independence comes from the *prompt*, not from temperature — two reads at
+temperature 0 with one prompt would be the same read twice, so the two cheap
+reads use materially different framings (a list, and a line-by-line
+transcription) and fail differently.
+
+The brand table is the second net. Both reads agreeing on garbage is still
+garbage, and an unresolvable reading never becomes medication state (SR-5)
+whatever its agreement.
+
+### Thinking is an escalation, not a setting
+
+| | recall | cost/image | thinking tokens |
+|---|---|---|---|
+| `thinkingBudget: 0` | 74.3% | $0.0033 | 0 |
+| default (thinking on) | 82.9% | $0.0729 | 1,061 – 62,910 |
+
+Thinking buys 8.6 points of recall for roughly 22× the cost — but on the sample
+the entire gain came from **one image in ten** (2/6 → 5/6 drugs); the other nine
+were identical. Spend is bimodal: median 1,840 tokens, spiking to 62,910. So
+thinking runs only when the two cheap reads disagree. Nonzero `thinkingBudget`
+values are silently ignored (256 and 1024 both produced ~62,911 tokens on the
+same image), so it is effectively a boolean.
+
+Measured cost of the shipped configuration: **$0.013** for a two-read
+prescription with bounding boxes, about $0.03 when it escalates.
 
 ## The idea in one function
 

@@ -351,3 +351,38 @@ def test_quantity_handling_does_not_rescue_a_combination():
     r = resolve("Tab Janumet 50/1000 1 BD")
     assert r.molecules == ("sitagliptin", "metformin")
     assert r.strengths_mg == ()
+
+
+# -- instruction words are not part of the brand --------------------------
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        "Cont. Tab Glimy (4mg)",
+        "Cont) Tab Glimy 4mg 1 BD before meal",
+        "Tab Glimy (4mg)",
+        "GLIMY TAB 4MG",
+        "Cont Glimy 4",
+    ],
+)
+def test_continuation_instructions_do_not_change_the_brand(written):
+    """A prescriber writes "Cont." to mean carry on with it.
+
+    Regression from a live run: one read transcribed "Cont. Tab Glimy (4mg)"
+    and another "Tab Glimy (4mg)", and the extraction agreement check counted
+    them as two different medications — inventing a duplicate and dropping the
+    real line to LOW confidence.
+    """
+    assert resolve(written).molecules == ("glimepiride",)
+
+
+def test_only_a_standalone_instruction_token_is_dropped():
+    """"Contiflo" must not be shortened to "Cont" plus a brand."""
+    from parchi.drugs import _tokenise
+
+    assert _tokenise("Contiflo 0.4") == ["contiflo", "0.4"]
+    assert resolve("Contiflo 0.4").molecules == ()
+
+
+def test_instruction_words_never_rescue_an_unknown_brand():
+    assert resolve("Cont. Tab Zzqx 5").molecules == ()

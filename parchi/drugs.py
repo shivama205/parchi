@@ -171,6 +171,18 @@ CONFUSION_SETS: tuple[tuple[str, ...], ...] = (
 #: forbids ("Glycomet GP must never silently resolve to plain metformin").
 RELEASE_MODIFIERS = frozenset({"sr", "xr", "cr", "er", "xl", "mr"})
 
+#: Continuation and repeat instructions. A prescriber writes "Cont. Tab Glimy"
+#: to mean carry on with it; the word belongs in MedicationMention.instruction,
+#: not in the brand name. Left in place it splits one drug into two lines —
+#: measured on a real prescription, where one read wrote "Cont. Tab Glimy (4mg)"
+#: and another wrote "Tab Glimy (4mg)", and the agreement check counted them as
+#: two different medications. Only a standalone token is dropped, so a brand
+#: like Contiflo is untouched.
+INSTRUCTION_TOKENS = frozenset({
+    "cont", "contd", "continue", "continued", "same", "rpt", "repeat", "as",
+    "per", "before", "after", "meal", "meals", "food", "empty", "stomach",
+})
+
 #: Dose-frequency shorthand. Trailing occurrences are stripped before matching.
 FREQUENCY_TOKENS = frozenset({
     "od", "bd", "bid", "tds", "tid", "qid", "qds", "hs", "sos",
@@ -233,9 +245,13 @@ def _strength_match(token: str) -> re.Match | None:
     return _STRENGTH_RE.match(token)
 
 
+#: Tokens that never carry composition, so dropping one cannot lose a molecule.
+NON_COMPOSITION_TOKENS = FORM_TOKENS | INSTRUCTION_TOKENS
+
+
 def _strip_forms(tokens: list[str]) -> list[str]:
-    """Drop every dosage-form and device word, wherever it appears."""
-    return [t for t in tokens if t not in FORM_TOKENS]
+    """Drop every dosage-form, device and instruction word, wherever it sits."""
+    return [t for t in tokens if t not in NON_COMPOSITION_TOKENS]
 
 
 def _is_droppable_tail(token: str) -> bool:
