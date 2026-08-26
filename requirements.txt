@@ -1,5 +1,15 @@
+# Runtime dependencies for the Cloud Run image.
+#
+# tests/test_requirements.py fails if a third-party module imported anywhere
+# under parchi/ is missing from this file. That test exists because two were:
+# google-cloud-storage (imported by blobs.GcsBlobStore) and python-multipart
+# (needed by the Form/UploadFile route). Both were installed locally and absent
+# here, and the container died on startup the moment PARCHI_BUCKET was set and
+# the Cloud Storage path was reached for the first time.
 google-adk==2.7.1
 google-genai==2.20.0
 google-cloud-firestore>=2.16
+google-cloud-storage>=2.18
 fastapi>=0.115
+python-multipart>=0.0.9
 uvicorn[standard]>=0.30

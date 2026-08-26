@@ -40,6 +40,31 @@ gcloud run deploy "$SERVICE" \
   --no-cpu-throttling \
   --set-env-vars "GOOGLE_CLOUD_PROJECT=$PROJECT,GOOGLE_CLOUD_LOCATION=$REGION,GOOGLE_GENAI_USE_VERTEXAI=true,PARCHI_TODAY=$TODAY,PARCHI_SWEEP_TOKEN=$TOKEN,PARCHI_BUCKET=$BUCKET"
 
+URL="$(gcloud run services describe "$SERVICE" --project "$PROJECT" \
+  --region "$REGION" --format='value(status.url)')"
+
+# Verify rather than announce. `gcloud run deploy` can leave a failed revision
+# behind while traffic stays on the previous good one, so "deployment failed"
+# and "the service still answers" are both true and it is easy to read the
+# second as success. Worse, piping this script's output through anything makes
+# the pipeline report tail's exit status instead of gcloud's — which is how a
+# failed deploy was first mistaken for a clean one.
 echo
-gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" \
-  --format="value(status.url)"
+echo "verifying $URL"
+HEALTH="$(curl -fsS --max-time 90 "$URL/api/health" || true)"
+case "$HEALTH" in
+  *'"ok":true'*)
+    echo "  health OK: $HEALTH"
+    ;;
+  *)
+    echo "  HEALTH CHECK FAILED: ${HEALTH:-no response}" >&2
+    echo "  the live revision may still be an older one — check:" >&2
+    echo "    gcloud run revisions list --service $SERVICE --region $REGION --project $PROJECT" >&2
+    exit 1
+    ;;
+esac
+
+LIVE="$(gcloud run services describe "$SERVICE" --project "$PROJECT" \
+  --region "$REGION" --format='value(status.latestReadyRevisionName)')"
+echo "  serving revision: $LIVE"
+echo "$URL"

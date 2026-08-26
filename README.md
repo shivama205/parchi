@@ -11,7 +11,7 @@ It does not diagnose, advise, or assert drug interactions. Ever.
 | **Demo video** | *(to be added before submission)* |
 | **Hackathon** | [All Things Agentic](https://allthingsagentichackathon.devpost.com/) · category **Collaborative Partner** |
 | **Region** | `asia-south1` (Mumbai) — everything, including document images |
-| **Tests** | 345, all offline |
+| **Tests** | 349, all offline |
 
 ---
 
@@ -83,7 +83,7 @@ python3 -m venv .venv
 ./.venv/bin/python -m pip install -e '.[dev]'
 ```
 
-Run the test suite — 345 tests, about half a second, no network:
+Run the test suite — 349 tests, about half a second, no network:
 
 ```bash
 ./.venv/bin/python -m pytest -q
@@ -335,6 +335,6 @@ The judgement layer costs nothing to run, because it is arithmetic. Per-token pr
 | `parchi/store.py` | Firestore and in-memory. Evidence only, never derived state. |
 | `parchi/blobs.py` | Cloud Storage and local. Document images. |
 | `parchi/server.py` | HTTP surface, upload pipeline, `safe_reply`. |
-| `tests/` | 345 tests, all offline behind faked transports. |
+| `tests/` | 349 tests, all offline behind faked transports. |
 
 `CLAUDE.md` holds the working rules for anyone — human or agent — changing this code.
