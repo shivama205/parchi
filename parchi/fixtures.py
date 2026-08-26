@@ -46,7 +46,12 @@ def _rx(doc_id: str, doc_date: date, prescriber: str, **kw) -> Document:
 DOCUMENTS = (
     _rx("RX1", date(2025, 7, 10), RAO, facility="City Heart Clinic"),
     _rx("RX2", date(2026, 1, 15), RAO, facility="City Heart Clinic"),
-    _rx("RX3", date(2026, 6, 20), RAO, facility="City Heart Clinic"),
+    # The J3 trigger. Dr Rao wrote "review after 10 weeks" on 20 Jun 2026,
+    # which lands on 27 Aug — one day after AS_OF, inside the sweep window.
+    # AC-9: the appointment date comes from a prescription ingested two months
+    # earlier, and no user action is involved.
+    _rx("RX3", date(2026, 6, 20), RAO, facility="City Heart Clinic",
+        follow_up_after_days=68),
     _rx("RX4", date(2025, 8, 5), IYER, facility="Nagpur Diabetes Centre"),
     _rx("RX5", date(2026, 3, 10), IYER, facility="Nagpur Diabetes Centre"),
     _rx("RX6", date(2026, 7, 5), IYER, facility="Nagpur Diabetes Centre"),

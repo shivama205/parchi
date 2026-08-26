@@ -183,10 +183,30 @@ class Document:
     facility: str | None = None
     source_file: str | None = None
     confidence: Confidence = Confidence.HIGH
+    #: A follow-up printed as a date ("Review on 12/09/2026").
+    follow_up_on: date | None = None
+    #: A follow-up printed as an interval ("Review after 15 days"), which is how
+    #: most prescriptions write it. Resolved against doc_date, never against the
+    #: upload date.
+    follow_up_after_days: int | None = None
 
     @property
     def is_undated(self) -> bool:
         return self.doc_date is None
+
+    @property
+    def follow_up_date(self) -> date | None:
+        """When the patient was told to come back, or None.
+
+        An interval needs a document date to resolve against; an undated
+        document cannot schedule anything, and guessing would be worse than
+        staying silent. This is what triggers the unprompted brief (§4 J3).
+        """
+        if self.follow_up_on is not None:
+            return self.follow_up_on
+        if self.follow_up_after_days is None or self.doc_date is None:
+            return None
+        return self.doc_date + timedelta(days=self.follow_up_after_days)
 
 
 # --------------------------------------------------------------------------

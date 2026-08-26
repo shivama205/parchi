@@ -33,7 +33,7 @@ python3 -m venv .venv
 ./.venv/bin/python -m pip install -e '.[dev]'
 ```
 
-Run the test suite (247 tests):
+Run the test suite (291 tests):
 
 ```bash
 ./.venv/bin/python -m pytest -q
@@ -96,7 +96,8 @@ measure of how demo-grade the table is.
 | Lab unit conversion (§8) | `parchi/labs.py` | Done — every factor cited |
 | Extraction (§9) | `parchi/extract.py` | Done — agreement-based confidence |
 | Per-prescriber correction memory (§4 J2.3) | — | Not started |
-| Brief assembly (§4 J3) | — | Not started |
+| Unprompted brief + sweep (§4 J3) | `parchi/brief.py` | Done |
+| Brief assembly (§4 J3) | `parchi/brief.py` | Done — deterministic |
 | ADK agents + Cloud Run (§10) | — | Not started |
 
 ---
@@ -150,6 +151,30 @@ misses produces no line at all, so it cannot be flagged — it is simply absent,
 and at 82.9% recall roughly one drug in six is. The confirmation loop surfaces
 what was read badly; it cannot surface what was never seen. Nothing in this
 codebase fixes that, and a caregiver should not be told the list is complete.
+
+## The unprompted brief
+
+```bash
+./.venv/bin/python -m parchi.brief
+```
+
+Takes no arguments and no input, which is the point. A scheduled sweep finds a
+follow-up date extracted from a prescription two months old and builds the brief
+without anybody asking (AC-9). Sections run in the order §4 J3 specifies,
+because that is the order a prescriber with seven minutes reads in.
+
+**Assembled in code, not by a model.** §9.2 lists brief assembly as a Flash
+task. It is deterministic Python here for one reason: SR-1 forbids
+clinical-claim vocabulary in anything a caregiver sees, and an invariant you can
+only check *after* generation is not an invariant. Every sentence comes from a
+template that the SR-1 test itself covers. Translation to Hindi (BR-13) is a
+model task — that is a language problem, not a judgement one, and it runs after
+the English has already passed.
+
+**"What changed" is a diff of two reconciliations.** `reconcile()` is pure and
+takes `as_of` as an argument, so the state the prescriber last saw is just
+`reconcile()` over the documents that existed then. No second code path and no
+snapshot to drift out of date.
 
 ## The idea in one function
 
