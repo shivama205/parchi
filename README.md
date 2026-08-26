@@ -152,10 +152,16 @@ Then edit `PROJECT` in `deploy.sh` and run it:
 ./deploy.sh
 ```
 
-Two deployment details that are not obvious and cost real time to discover:
+`deploy.sh` derives the bucket name from `PROJECT`, so if you named yours
+differently, set `BUCKET` too.
+
+Three deployment details that are not obvious and cost real time to discover. All
+three are handled in `deploy.sh`; they are written down because each one fails in
+a way that does not look like a failure.
 
 - **`gcloud run` needs `grpcio`**, which the Homebrew cask's Python does not have. `deploy.sh` points `CLOUDSDK_PYTHON` at a virtualenv that does and sets `CLOUDSDK_PYTHON_SITEPACKAGES=1`; without both, every `gcloud run` command fails with `No module named 'grpc'`.
-- **Cloud Run throttles CPU outside a request** by default, which silently freezes the background ingestion. The deploy sets `--no-cpu-throttling`. Cloud Tasks is the production answer.
+- **Cloud Run throttles CPU outside a request** by default, which silently freezes the background ingestion started by `/api/upload`. Without `--no-cpu-throttling`, an upload returns `200` and nothing is ever read. Cloud Tasks is the production answer.
+- **`PARCHI_BUCKET` must be set**, or `make_blobs()` falls back to the container filesystem. That is the worst of the three, because it does not look broken: the upload returns `200`, the image writes to a disk that is ephemeral and per-instance, and it disappears when Cloud Run scales to zero or routes the next request elsewhere.
 
 A bare `/healthz` is answered upstream of the container on Cloud Run — the 404 arrives with no `Google Frontend` header — so health lives at `/api/health`.
 
