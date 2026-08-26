@@ -166,7 +166,7 @@ something clinical, not to stop it saying where a test was run. Quoted text is
 now handled in two kinds:
 
 - **A proper noun we matched** — a laboratory, a prescriber, a brand in the
-  table — is declared in  and masked before the scan, then shown
+  table — is declared in `quoted_names` and masked before the scan, then shown
   intact.
 - **A reading that resolved to nothing** is arbitrary model output about an
   unreadable scrawl and can say anything, so forbidden vocabulary in it is
