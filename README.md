@@ -33,7 +33,7 @@ python3 -m venv .venv
 ./.venv/bin/python -m pip install -e '.[dev]'
 ```
 
-Run the test suite (315 tests):
+Run the test suite (332 tests):
 
 ```bash
 ./.venv/bin/python -m pytest -q
@@ -95,6 +95,9 @@ measure of how demo-grade the table is.
 | Safety invariants SR-1…SR-9 (§11) | enforced in models + `tests/` | Done |
 | Lab unit conversion (§8) | `parchi/labs.py` | Done — every factor cited |
 | Extraction (§9) | `parchi/extract.py` | Done — agreement-based confidence |
+| Bulk ingestion + timeline (AC-1) | `parchi/server.py` | Done |
+| Printed fixture generator | `make_documents.py` | Done — 13 documents |
+| Document images | `parchi/blobs.py` | Done — Cloud Storage, asia-south1 |
 | Per-prescriber correction memory (§4 J2.3) | — | Not started |
 | Unprompted brief + sweep (§4 J3) | `parchi/brief.py` | Done |
 | Brief assembly (§4 J3) | `parchi/brief.py` | Done — deterministic |

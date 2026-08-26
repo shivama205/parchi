@@ -443,3 +443,51 @@ def test_a_strength_unit_disagreement_does_not_invent_a_medication():
 def test_an_unknown_brand_is_still_distinguished_from_a_different_one():
     """Convergence must not go so far that two real drugs merge."""
     assert line_key("T Cepodem 200mg") != line_key("T Valavir 1gm")
+
+
+# ==========================================================================
+# Follow-up capture — what makes J3 unprompted
+# ==========================================================================
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("Review after 68 days  —  27/08/2026", (date(2026, 8, 27), None)),
+        ("F/U 12/09/2026", (date(2026, 9, 12), None)),
+        ("Review after 2 weeks", (None, 14)),
+        ("review in 3 months", (None, 90)),
+        ("Repeat after 10 wks", (None, 70)),
+        ("come back next time", (None, None)),
+        ("", (None, None)),
+        (None, (None, None)),
+    ],
+)
+def test_a_follow_up_instruction_is_read_as_a_date_or_an_interval(text, expected):
+    from parchi.extract import parse_follow_up
+
+    assert parse_follow_up(text) == expected
+
+
+def test_an_explicit_date_wins_over_an_interval():
+    """Both are often written. A date needs no arithmetic, so prefer it."""
+    from parchi.extract import parse_follow_up
+
+    on, after = parse_follow_up("Review after 9 weeks — 27/08/2026")
+    assert on == date(2026, 8, 27)
+    assert after is None
+
+
+def test_the_follow_up_reaches_the_extraction_result():
+    result = combine([
+        read(med("Telma 40"), follow_up="Review after 2 weeks"),
+        read(med("Telma 40"), follow_up="Review after 2 weeks"),
+    ])
+    assert result.follow_up_text == "Review after 2 weeks"
+    assert result.follow_up_after_days == 14
+    assert result.follow_up_on is None
+
+
+def test_no_follow_up_written_means_none_invented():
+    result = combine([read(med("Telma 40")), read(med("Telma 40"))])
+    assert result.follow_up_text is None
+    assert result.follow_up_on is None and result.follow_up_after_days is None

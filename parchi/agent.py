@@ -40,6 +40,7 @@ from .extract import Transport, VertexTransport, extract, to_mentions
 from .labs import normalise_reading as normalise_lab_reading
 from .models import ACTIVE_LIKE, Confidence, MedStatus, analyte_display
 from .reconcile import reconcile
+from .blobs import BlobStore
 from .store import Correction, MemoryStore, Store, apply_corrections
 
 MODEL = "gemini-3.5-flash"
@@ -75,6 +76,7 @@ class Deps:
     store: Store
     transport: Transport | None = None
     today: Callable[[], date] = date.today
+    blobs: "BlobStore | None" = None
 
     def read_transport(self) -> Transport:
         if self.transport is None:
@@ -126,8 +128,9 @@ def tool_read_document(deps: Deps, patient_id: str, document_id: str) -> dict:
         return {"error": f"no document {document_id} for this patient"}
     if not doc.source_file:
         return {"error": f"document {document_id} has no image on file"}
-    with open(doc.source_file, "rb") as fh:
-        image = fh.read()
+    if deps.blobs is None:
+        return {"error": "no image store configured"}
+    image = deps.blobs.get(doc.source_file)
     mime = "image/png" if doc.source_file.lower().endswith(".png") else "image/jpeg"
     result = extract(image, transport=deps.read_transport(), mime_type=mime)
 
@@ -141,11 +144,20 @@ def tool_read_document(deps: Deps, patient_id: str, document_id: str) -> dict:
                      "on the timeline. Ask the caregiver for the date."),
             "cost_usd": round(result.usage.cost_usd, 5),
         }
-    if doc.doc_date is None:
-        # The date came off the page, not off the clock, so it is not inferred.
-        deps.store.put_document(
-            dc_replace(doc, doc_date=doc_date, doc_date_inferred=False)
-        )
+    # Write back everything the page told us about itself: the date, who wrote
+    # it, where, and when to come back. Without this the timeline shows no
+    # prescriber and the J3 sweep has no follow-up to find, even though both
+    # were read off the paper.
+    deps.store.put_document(dc_replace(
+        doc,
+        doc_date=doc_date,
+        doc_date_inferred=False,
+        prescriber=doc.prescriber or result.prescriber,
+        facility=doc.facility or result.facility,
+        follow_up_on=doc.follow_up_on or result.follow_up_on,
+        follow_up_after_days=(doc.follow_up_after_days
+                              or result.follow_up_after_days),
+    ))
 
     mentions = to_mentions(
         result,
@@ -162,6 +174,8 @@ def tool_read_document(deps: Deps, patient_id: str, document_id: str) -> dict:
         "date_on_document": doc_date.isoformat(),
         "read": len(result.lines),
         "stored": len(mentions),
+        "prescriber": doc.prescriber or result.prescriber,
+        "follow_up": (result.follow_up_text or None),
         "needs_confirmation": [
             {"mention_id": m.id, "we_read": m.brand_text}
             for m in mentions if m.needs_confirmation or not m.is_resolved

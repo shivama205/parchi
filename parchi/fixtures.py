@@ -129,24 +129,41 @@ def _lab(lid, doc_id, day, label, value, unit, lab, low, high):
     return out.result
 
 
-# HbA1c rising across four measurements at three labs — and Metropolis reports
-# IFCC mmol/mol while the others report NGSP %. AC-8 needs exactly this: two
+# The values exactly as they appear on the printed reports, and the single
+# source of truth for both LAB_RESULTS and make_documents.py. Keeping them in
+# one place is not tidiness: the generator previously read the *normalised*
+# reference range off LabResult and printed 3.98-5.99 on a report whose own
+# units are mmol/mol, which is a document that could not exist.
+#
+# HbA1c rises across four measurements at three labs, and Metropolis reports
+# IFCC mmol/mol while the others report NGSP %. AC-8 needs exactly that: two
 # units landing on one normalised axis, each point keeping its own printed
 # range. 64 mmol/mol normalises to 8.01%.
-LAB_RESULTS = (
-    _lab("L1", "LR1", date(2025, 7, 8), "HbA1c", 7.1, "%",
-         "SRL", 4.0, 5.7),
-    _lab("L2", "LR2", date(2026, 1, 12), "HBA1C (Glycosylated Hb)", 7.6, "%",
-         "Dr Lal PathLabs", 4.0, 5.6),
-    _lab("L3", "LR3", date(2026, 3, 8), "Glycosylated Haemoglobin", 64, "mmol/mol",
-         "Metropolis", 20, 42),
-    _lab("L4", "LR4", date(2026, 6, 18), "HbA1c", 8.4, "%",
-         "Dr Lal PathLabs", 4.0, 5.6),
-
+PRINTED_LABS: tuple[dict, ...] = (
+    {"id": "L1", "document_id": "LR1", "doc_date": date(2025, 7, 8),
+     "label": "HbA1c", "value": 7.1, "unit": "%",
+     "lab": "SRL", "low": 4.0, "high": 5.7},
+    {"id": "L2", "document_id": "LR2", "doc_date": date(2026, 1, 12),
+     "label": "HBA1C (Glycosylated Hb)", "value": 7.6, "unit": "%",
+     "lab": "Dr Lal PathLabs", "low": 4.0, "high": 5.6},
+    {"id": "L3", "document_id": "LR3", "doc_date": date(2026, 3, 8),
+     "label": "Glycosylated Haemoglobin", "value": 64, "unit": "mmol/mol",
+     "lab": "Metropolis", "low": 20, "high": 42},
+    {"id": "L4", "document_id": "LR4", "doc_date": date(2026, 6, 18),
+     "label": "HbA1c", "value": 8.4, "unit": "%",
+     "lab": "Dr Lal PathLabs", "low": 4.0, "high": 5.6},
     # Creatinine measured twice inside the window at different labs, one
     # reporting SI units. 97 µmol/L normalises to 1.1 mg/dL.
-    _lab("L5", "LR4", date(2026, 6, 18), "Creatinine, Serum", 97, "µmol/L",
-         "Dr Lal PathLabs", 62, 115),
-    _lab("L6", "LR5", date(2026, 7, 2), "S. Creatinine", 1.2, "mg/dL",
-         "SRL", 0.6, 1.2),
+    {"id": "L5", "document_id": "LR4", "doc_date": date(2026, 6, 18),
+     "label": "Creatinine, Serum", "value": 97, "unit": "µmol/L",
+     "lab": "Dr Lal PathLabs", "low": 62, "high": 115},
+    {"id": "L6", "document_id": "LR5", "doc_date": date(2026, 7, 2),
+     "label": "S. Creatinine", "value": 1.2, "unit": "mg/dL",
+     "lab": "SRL", "low": 0.6, "high": 1.2},
+)
+
+LAB_RESULTS = tuple(
+    _lab(r["id"], r["document_id"], r["doc_date"], r["label"], r["value"],
+         r["unit"], r["lab"], r["low"], r["high"])
+    for r in PRINTED_LABS
 )

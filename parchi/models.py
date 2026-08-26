@@ -189,6 +189,13 @@ class Document:
     #: most prescriptions write it. Resolved against doc_date, never against the
     #: upload date.
     follow_up_after_days: int | None = None
+    #: Where this document is in the reading pipeline. Plain strings rather than
+    #: an enum so the Firestore round-trip needs no special casing.
+    #: queued -> reading -> ready | undated | failed
+    ingest_status: str = "ready"
+    ingest_note: str | None = None
+    #: Set when the same bytes arrive twice in one batch.
+    content_digest: str | None = None
 
     @property
     def is_undated(self) -> bool:

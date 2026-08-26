@@ -169,3 +169,81 @@ def test_the_prescriber_page_is_served(client):
     # The boundary has to be visible to the prescriber, not only to the family.
     assert "nothing here is a diagnosis" in r.text.lower()
     assert "no real patient data" in r.text.lower()
+
+
+# ==========================================================================
+# Ingestion — AC-1
+# ==========================================================================
+
+def _png(name="scan.png", body=b"\x89PNG\r\n\x1a\n" + b"x" * 64):
+    return ("files", (name, body, "image/png"))
+
+
+def test_an_upload_returns_before_anything_is_read(client, monkeypatch):
+    """J1: the interface never blocks on reading (NFR-1)."""
+    monkeypatch.setenv("PARCHI_STORE", "memory")
+    r = client.post("/api/upload", data={"patient_id": "up1"},
+                    files=[_png("a.png"), _png("b.png", b"different bytes")])
+    assert r.status_code == 200
+    body = r.json()
+    assert body["queued"] == 2
+    assert [a["document_id"] for a in body["accepted"]] == [
+        "UP20260826-001", "UP20260826-002"]
+
+
+def test_identical_bytes_in_one_batch_are_not_read_twice(client):
+    same = b"\x89PNG\r\n\x1a\n" + b"identical"
+    first = client.post("/api/upload", data={"patient_id": "dup"},
+                        files=[("files", ("a.png", same, "image/png"))]).json()
+    second = client.post("/api/upload", data={"patient_id": "dup"},
+                         files=[("files", ("b.png", same, "image/png"))]).json()
+    assert second["accepted"] == []
+    assert second["duplicates"][0]["same_as"] == first["accepted"][0]["document_id"]
+
+
+def test_document_ids_stay_contiguous_across_batches(client):
+    a = client.post("/api/upload", data={"patient_id": "seq"},
+                    files=[_png("1.png", b"one")]).json()
+    b = client.post("/api/upload", data={"patient_id": "seq"},
+                    files=[_png("2.png", b"two")]).json()
+    assert a["accepted"][0]["document_id"].endswith("-001")
+    assert b["accepted"][0]["document_id"].endswith("-002")
+
+
+def test_ac1_the_timeline_is_ordered_by_the_date_on_the_document(client):
+    """Not by upload order, not by id."""
+    client.post("/api/seed")
+    t = client.get("/api/timeline/p-fixture-1").json()
+    dates = [r["date_on_document"] for r in t["timeline"]]
+    assert dates == sorted(dates)
+    assert len(dates) == 9
+    assert t["counts"] == {"ready": 9}
+    assert t["settled"] is True
+
+
+def test_an_undated_document_is_listed_apart_from_the_timeline(client):
+    """§4 J1.4 — flagged as undated rather than given the upload date.
+
+    A document with no legible date never enters the timeline, whatever stage
+    of reading it is at: queued, unreadable, or read and genuinely undated.
+    """
+    client.post("/api/seed")
+    t = client.get("/api/timeline/p-fixture-1").json()
+    assert t["undated"] == []
+
+    client.post("/api/upload", data={"patient_id": "p-fixture-1"},
+                files=[_png("late.png", b"unread bytes")])
+    t2 = client.get("/api/timeline/p-fixture-1").json()
+    assert len(t2["undated"]) == 1
+    assert t2["undated"][0]["status"] in ("queued", "reading", "failed", "undated")
+    # It must not have been slotted into the timeline under today's date.
+    assert [r["date_on_document"] for r in t2["timeline"]] == \
+        [r["date_on_document"] for r in t["timeline"]]
+
+
+def test_deleting_a_patient_also_removes_the_images(client):
+    client.post("/api/upload", data={"patient_id": "wipe"},
+                files=[_png("x.png", b"some image bytes")])
+    gone = client.delete("/api/patient/wipe").json()
+    assert gone["records_removed"] >= 1
+    assert gone["images_removed"] >= 1

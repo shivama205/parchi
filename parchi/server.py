@@ -25,15 +25,19 @@ overclaim this product exists to avoid.
 # returns 422) and schema generation fails outright (/openapi.json returns 500).
 # Both of those shipped to Cloud Run before a route test caught them.
 
+import asyncio
+import dataclasses
 import os
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
 
 from pydantic import BaseModel
 
-from .agent import Deps, build_fleet, sweep_once
-from .models import clinical_claim_phrases_in
+from .agent import Deps, build_fleet, sweep_once, tool_read_document
+from .blobs import GcsBlobStore, LocalBlobStore, blob_key, content_digest
+from .models import Document, DocumentKind, clinical_claim_phrases_in
 from .reconcile import reconcile
 from .store import FirestoreStore, MemoryStore, Store
 
@@ -90,6 +94,21 @@ def _fallback(deps: Deps, patient_id: str) -> str:
     return "\n".join(lines) or "Nothing outstanding on the paperwork."
 
 
+#: How many documents are read at once. Extraction is three Vertex calls per
+#: document and entirely I/O bound, so concurrency is cheap; the cap exists to
+#: keep a 40-file dump from opening 120 sockets at once.
+INGEST_CONCURRENCY = 6
+
+
+def make_blobs():
+    """Cloud Storage in Cloud Run, the filesystem locally."""
+    bucket = os.getenv("PARCHI_BUCKET")
+    project = os.getenv("GOOGLE_CLOUD_PROJECT")
+    if bucket and project and os.getenv("PARCHI_STORE", "").lower() != "memory":
+        return GcsBlobStore(bucket, project=project)
+    return LocalBlobStore(os.getenv("PARCHI_BLOB_DIR", "/tmp/parchi-blobs"))
+
+
 def make_store() -> Store:
     """Firestore in Cloud Run, in-memory locally so the demo needs no project."""
     if os.getenv("PARCHI_STORE", "").lower() == "memory":
@@ -113,16 +132,17 @@ def seed_fixture(store: Store) -> str:
 
 
 def create_app():
-    from fastapi import FastAPI, HTTPException, Request
+    from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
     from fastapi.responses import FileResponse, JSONResponse
     from google.adk.runners import Runner
     from google.adk.sessions import InMemorySessionService
     from google.genai import types
     store = make_store()
+    blobs = make_blobs()
     # A fixed clock keeps the demo reproducible; unset it for real time.
     pinned = os.getenv("PARCHI_TODAY")
     today = (lambda: date.fromisoformat(pinned)) if pinned else date.today
-    deps = Deps(store=store, today=today)
+    deps = Deps(store=store, today=today, blobs=blobs)
     coordinator, fleet = build_fleet(deps)
 
     sessions = InMemorySessionService()
@@ -198,6 +218,136 @@ def create_app():
                 deps, body.patient_id or "p-fixture-1")
         return payload
 
+    @app.post("/api/upload")
+    async def upload(
+        request: Request,
+        patient_id: str = Form("p-fixture-1"),
+        files: list[UploadFile] = File(...),
+    ):
+        """Accept an unordered batch of documents. Returns before reading them.
+
+        J1: the caregiver forwards photographs. Nothing is sorted, labelled or
+        renamed first, because any flow that requires that will not be used.
+        Reading happens after the response, so a 40-file dump never blocks
+        (NFR-1). Cloud Tasks is the production answer; a background task plus
+        --no-cpu-throttling is the hackathon one, and CPU throttling would
+        silently freeze this work without that flag.
+        """
+        existing = deps.store.list_documents(patient_id)
+        seen: dict[str, str] = {
+            doc.content_digest: doc.id for doc in existing if doc.content_digest
+        }
+        # Numbering continues from what is already on file, and increments only
+        # for documents actually accepted, so ids stay contiguous.
+        next_number = len(existing) + 1
+
+        accepted, duplicates = [], []
+        for index, upload_file in enumerate(files):
+            data = await upload_file.read()
+            if not data:
+                continue
+            digest = content_digest(data)
+            if digest in seen:
+                duplicates.append({"filename": upload_file.filename,
+                                   "same_as": seen[digest]})
+                continue
+            document_id = f"UP{today():%Y%m%d}-{next_number:03d}"
+            next_number += 1
+            key = blob_key(patient_id, document_id, upload_file.filename or f"f{index}")
+            blobs.put(key, data, upload_file.content_type or "image/jpeg")
+            seen[digest] = document_id
+            deps.store.put_document(Document(
+                id=document_id,
+                patient_id=patient_id,
+                kind=DocumentKind.UNKNOWN,
+                source_file=key,
+                ingest_status="queued",
+                content_digest=digest,
+            ))
+            accepted.append({"document_id": document_id,
+                             "filename": upload_file.filename,
+                             "bytes": len(data)})
+
+        if accepted:
+            queued_ids = [a["document_id"] for a in accepted]
+            asyncio.get_running_loop().run_in_executor(
+                None, _ingest_batch, patient_id, queued_ids)
+
+        return {"patient_id": patient_id, "accepted": accepted,
+                "duplicates": duplicates, "queued": len(accepted)}
+
+    def _ingest_batch(patient_id: str, document_ids: list[str]) -> None:
+        with ThreadPoolExecutor(max_workers=INGEST_CONCURRENCY) as pool:
+            list(pool.map(lambda d: _ingest_one(patient_id, d), document_ids))
+
+    def _ingest_one(patient_id: str, document_id: str) -> None:
+        doc = deps.store.get_document(patient_id, document_id)
+        if doc is None:
+            return
+        deps.store.put_document(dataclasses.replace(doc, ingest_status="reading"))
+        try:
+            result = tool_read_document(deps, patient_id, document_id)
+        except Exception as exc:  # a bad scan must not take the batch down
+            deps.store.put_document(dataclasses.replace(
+                doc, ingest_status="failed", ingest_note=str(exc)[:200]))
+            return
+        fresh = deps.store.get_document(patient_id, document_id) or doc
+        if "error" in result:
+            deps.store.put_document(dataclasses.replace(
+                fresh, ingest_status="failed", ingest_note=result["error"]))
+        elif result.get("note"):
+            # No legible date. Flagged, never given the upload date (§4 J1.4).
+            deps.store.put_document(dataclasses.replace(
+                fresh, ingest_status="undated", ingest_note=result["note"]))
+        else:
+            deps.store.put_document(dataclasses.replace(
+                fresh, ingest_status="ready",
+                kind=DocumentKind(result.get("kind", "unknown")),
+                ingest_note=f"{result['stored']} entries recorded"))
+
+    @app.post("/api/ingest/{patient_id}")
+    def ingest_now(patient_id: str):
+        """Read anything still queued, synchronously.
+
+        The background path is the normal one; this exists so a demo, a test, or
+        a retry after a cold start can drive ingestion without waiting on it.
+        """
+        queued = [d.id for d in deps.store.list_documents(patient_id)
+                  if d.ingest_status in ("queued", "failed")]
+        _ingest_batch(patient_id, queued)
+        return {"processed": queued}
+
+    @app.get("/api/timeline/{patient_id}")
+    def timeline(patient_id: str):
+        """Documents in the order they were written, not the order they arrived.
+
+        AC-1. Undated documents are listed separately rather than being slotted
+        in under their upload date.
+        """
+        docs = deps.store.list_documents(patient_id)
+        mentions = deps.store.list_mentions(patient_id)
+        per_doc: dict[str, int] = {}
+        for m in mentions:
+            per_doc[m.document_id] = per_doc.get(m.document_id, 0) + 1
+
+        def row(d):
+            return {"document_id": d.id, "kind": d.kind.value,
+                    "date_on_document": d.doc_date.isoformat() if d.doc_date else None,
+                    "prescriber": d.prescriber, "facility": d.facility,
+                    "status": d.ingest_status, "note": d.ingest_note,
+                    "entries_recorded": per_doc.get(d.id, 0),
+                    "follow_up": d.follow_up_date.isoformat() if d.follow_up_date else None}
+
+        dated = [row(d) for d in docs if d.doc_date is not None]
+        undated = [row(d) for d in docs if d.doc_date is None]
+        counts: dict[str, int] = {}
+        for d in docs:
+            counts[d.ingest_status] = counts.get(d.ingest_status, 0) + 1
+        return {"patient_id": patient_id, "total": len(docs), "counts": counts,
+                "timeline": dated, "undated": undated,
+                "settled": all(d.ingest_status not in ("queued", "reading")
+                               for d in docs)}
+
     @app.get("/api/brief/{patient_id}")
     def brief_json(patient_id: str, on: str | None = None):
         """The brief as structured data, for the prescriber view.
@@ -259,7 +409,9 @@ def create_app():
     def forget(patient_id: str):
         """BR-20 — removes source documents, observations and corrections."""
         removed = store.delete_patient(patient_id)
-        return {"patient_id": patient_id, "records_removed": removed}
+        images = blobs.delete_prefix(f"patients/{patient_id}")
+        return {"patient_id": patient_id, "records_removed": removed,
+                "images_removed": images}
 
     return app
 

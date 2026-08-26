@@ -126,6 +126,7 @@ _SCHEMA = {
         "date_on_document": {"type": "string", "nullable": True},
         "prescriber": {"type": "string", "nullable": True},
         "facility": {"type": "string", "nullable": True},
+        "follow_up": {"type": "string", "nullable": True},
         "medications": {
             "type": "array",
             "items": {
@@ -153,7 +154,9 @@ _CONTRACT = (
     "is not written on the document.\n"
     "- box_2d is [ymin, xmin, ymax, xmax] as integers normalised to 0-1000, "
     "tightly around that one medication line.\n"
-    "- Include every medication order, including ones you find hard to read."
+    "- Include every medication order, including ones you find hard to read.\n"
+    "- follow_up: copy any instruction to come back, verbatim — a date, or an "
+    "interval like 'review after 2 weeks'. Null if none is written."
 )
 
 #: Two framings, not two samples. Independence has to come from the prompt —
@@ -295,6 +298,12 @@ class ExtractionResult:
     prescriber: str | None = None
     facility: str | None = None
     lines: tuple[ExtractedLine, ...] = ()
+    #: The follow-up instruction as written, and what it resolves to. This is
+    #: what makes J3 unprompted: the appointment date comes off a page read
+    #: months earlier, not from anything the caregiver does.
+    follow_up_text: str | None = None
+    follow_up_on: date | None = None
+    follow_up_after_days: int | None = None
     usage: Usage = field(default_factory=Usage)
     #: True when the cheap reads disagreed and a thinking read was spent.
     escalated: bool = False
@@ -336,6 +345,34 @@ def _parse_box(raw) -> tuple[float, float, float, float] | None:
     if box[2] <= box[0] or box[3] <= box[1]:
         return None
     return box
+
+
+_INTERVAL_RE = re.compile(
+    r"\b(?:after|in|review\s+in|repeat\s+after)\s+(\d{1,3})\s*"
+    r"(day|days|week|weeks|month|months|wk|wks|mo)\b",
+    re.IGNORECASE,
+)
+_INTERVAL_UNITS = {"day": 1, "days": 1, "week": 7, "weeks": 7, "wk": 7,
+                   "wks": 7, "month": 30, "months": 30, "mo": 30}
+
+
+def parse_follow_up(text: str | None) -> tuple[date | None, int | None]:
+    """Read a follow-up instruction into a date or an interval.
+
+    Prescriptions write both — "Review after 2 weeks", "F/U 12/09/2026", or
+    both together. A date is preferred when present because it needs no
+    arithmetic; an interval is resolved against the document date later, never
+    against the upload date.
+    """
+    if not text:
+        return None, None
+    explicit = parse_document_date(text)
+    if explicit is not None:
+        return explicit, None
+    m = _INTERVAL_RE.search(text)
+    if m:
+        return None, int(m.group(1)) * _INTERVAL_UNITS[m.group(2).lower()]
+    return None, None
 
 
 _DATE_PATTERNS = (
@@ -458,6 +495,8 @@ def combine(reads: Sequence[RawRead]) -> ExtractionResult:
         )
 
     date_text = _first(reads, "date_on_document")
+    follow_up_text = _first(reads, "follow_up")
+    follow_up_on, follow_up_after = parse_follow_up(follow_up_text)
     usage = Usage()
     for r in reads:
         usage = usage + r.usage
@@ -469,6 +508,9 @@ def combine(reads: Sequence[RawRead]) -> ExtractionResult:
         prescriber=_first(reads, "prescriber"),
         facility=_first(reads, "facility"),
         lines=tuple(merged),
+        follow_up_text=follow_up_text,
+        follow_up_on=follow_up_on,
+        follow_up_after_days=follow_up_after,
         usage=usage,
         escalated=any(r.thinking for r in reads),
         notes=tuple(notes),
