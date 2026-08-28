@@ -82,7 +82,7 @@
 <!-- ============ DETERMINISTIC CORE ============ -->
 <text x="30" y="552" font-size="10.5" letter-spacing="1.6" fill="#6E6A61">CORE</text>
 <rect x="30" y="560" width="740" height="164" rx="8" fill="#FBFAF7" stroke="#16213A" stroke-width="1.6"/>
-<text x="46" y="582" font-size="12.5" font-weight="500" fill="#16213A">No model call below this line. Pure, deterministic, 345 tests.</text>
+<text x="46" y="582" font-size="12.5" font-weight="500" fill="#16213A">No model call below this line. Pure, deterministic, fully tested.</text>
 
 <g>
   <rect x="46" y="594" width="226" height="56" rx="5" fill="#F4F2EC" stroke="#B6B1A6"/>

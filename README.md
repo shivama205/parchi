@@ -11,7 +11,7 @@ It does not diagnose, advise, or assert drug interactions. Ever.
 | **Demo video** | *(to be added before submission)* |
 | **Hackathon** | [All Things Agentic](https://allthingsagentichackathon.devpost.com/) · category **Collaborative Partner** |
 | **Region** | `asia-south1` (Mumbai) — everything, including document images |
-| **Tests** | 349, all offline |
+| **Tests** | 355, all offline |
 
 ---
 
@@ -83,7 +83,7 @@ python3 -m venv .venv
 ./.venv/bin/python -m pip install -e '.[dev]'
 ```
 
-Run the test suite — 349 tests, about half a second, no network:
+Run the test suite — 355 tests, about half a second, no network:
 
 ```bash
 ./.venv/bin/python -m pytest -q
@@ -151,6 +151,30 @@ Then edit `PROJECT` in `deploy.sh` and run it:
 ```bash
 ./deploy.sh
 ```
+
+Finally the scheduled sweep, which is what makes the brief unprompted. There is
+no model call behind this endpoint — finding a date in a window and assembling a
+cited brief is arithmetic, and paying a model to do arithmetic on a timer is how
+a per-patient budget disappears:
+
+```bash
+gcloud scheduler jobs create http parchi-sweep --project=YOUR_PROJECT \
+  --location=asia-south1 --schedule="0 7 * * *" --time-zone="Asia/Kolkata" \
+  --uri="$(cat .sweep-token.local >/dev/null && echo YOUR_SERVICE_URL)/api/sweep" \
+  --http-method=POST --headers="x-parchi-token=$(cat .sweep-token.local)" \
+  --attempt-deadline=300s
+```
+
+Confirm it fired rather than assuming it did — a job can exist and never have
+run:
+
+```bash
+gcloud logging read 'resource.labels.service_name="parchi" AND httpRequest.requestUrl=~"sweep"' --project=YOUR_PROJECT --limit=3 --freshness=20m --format="value(timestamp,httpRequest.status,httpRequest.userAgent)"
+```
+
+A `200` with userAgent `Google-Cloud-Scheduler` is the proof. The token lives in
+a gitignored file; Secret Manager is the production answer, and putting it in a
+job header means it is visible in the job's configuration.
 
 `deploy.sh` derives the bucket name from `PROJECT`, so if you named yours
 differently, set `BUCKET` too.
@@ -335,6 +359,6 @@ The judgement layer costs nothing to run, because it is arithmetic. Per-token pr
 | `parchi/store.py` | Firestore and in-memory. Evidence only, never derived state. |
 | `parchi/blobs.py` | Cloud Storage and local. Document images. |
 | `parchi/server.py` | HTTP surface, upload pipeline, `safe_reply`. |
-| `tests/` | 349 tests, all offline behind faked transports. |
+| `tests/` | 355 tests, all offline behind faked transports. |
 
 `CLAUDE.md` holds the working rules for anyone — human or agent — changing this code.
